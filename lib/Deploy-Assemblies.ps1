@@ -1,16 +1,41 @@
-# Stage 2: update already-registered plugin/workflow assemblies.
+# Update already-registered plugin/workflow assemblies. Used for two stages:
+#   - "CRM Non-Isolated Assemblies" (isolation mode None), deployed first
+#   - "CRM Assemblies" (isolation mode Sandbox), deployed after the solutions
 #
 # Only assemblies that are already registered in the org are updated: the
 # new DLL's bytes replace the pluginassembly record's content, so all
 # existing plugin types and steps stay as they are. A new assembly (or one
 # whose major.minor version changed, which CRM treats as a different
 # assembly) must be registered with the Plugin Registration Tool first.
+# The registered isolation mode must match the folder the DLL is in; this
+# script never changes an assembly's isolation mode.
+
+# pluginassembly.isolationmode option values.
+$script:IsolationModes = @{ 1 = 'None'; 2 = 'Sandbox'; 3 = 'External' }
+
+function Get-RegisteredIsolationMode {
+    <#
+    .SYNOPSIS
+    Returns the record's isolation mode as None, Sandbox or External, from the
+    raw option value when available, else from the formatted label.
+    #>
+    param([Parameter(Mandatory)]$Record)
+    # Get-CrmRecords puts the attribute's key/value pair in isolationmode_Property;
+    # its value is an OptionSetValue.
+    try {
+        $raw = [int]$Record.isolationmode_Property.Value.Value
+        if ($script:IsolationModes.ContainsKey($raw)) { return $script:IsolationModes[$raw] }
+    } catch {
+        # Fall back to the formatted label below.
+    }
+    return [string]$Record.isolationmode
+}
 
 function Get-AssemblyPlan {
     <#
     .SYNOPSIS
     Reads the identity of each DLL in the folder, and throws if any DLL is not
-    a .NET assembly or is not strong-name signed (required for Sandbox).
+    a .NET assembly or is not strong-name signed (CRM requires it).
     #>
     param([Parameter(Mandatory)][string]$Folder)
 
@@ -27,7 +52,7 @@ function Get-AssemblyPlan {
         }
         $tokenBytes = $identity.GetPublicKeyToken()
         if (-not $tokenBytes -or $tokenBytes.Length -eq 0) {
-            $problems += "'$($dll.Name)' is not strong-name signed (required for Sandbox isolation)"
+            $problems += "'$($dll.Name)' is not strong-name signed, which CRM requires"
             continue
         }
         $culture = $identity.CultureName
@@ -54,7 +79,8 @@ function Find-RegisteredAssembly {
     #>
     param(
         $Conn,
-        [Parameter(Mandatory)]$Assembly
+        [Parameter(Mandatory)]$Assembly,
+        [Parameter(Mandatory)][ValidateSet('None', 'Sandbox')][string]$IsolationMode
     )
     $result = Get-CrmRecords -conn $Conn -EntityLogicalName pluginassembly `
         -FilterAttribute name -FilterOperator eq -FilterValue $Assembly.Name `
@@ -84,6 +110,10 @@ function Find-RegisteredAssembly {
     if ($record.culture -and $record.culture -ne $Assembly.Culture) {
         throw "Culture '$($Assembly.Culture)' does not match the registered '$($record.culture)'."
     }
+    $registeredMode = Get-RegisteredIsolationMode -Record $record
+    if ($registeredMode -ne $IsolationMode) {
+        throw "Registered with isolation mode '$registeredMode', but this folder is for '$IsolationMode'. Move the DLL to the right folder, or change the registration with the Plugin Registration Tool."
+    }
     return $record
 }
 
@@ -92,10 +122,12 @@ function Invoke-AssemblyDeployment {
     param(
         $Conn,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Assemblies,
+        [Parameter(Mandatory)][ValidateSet('None', 'Sandbox')][string]$IsolationMode,
+        [Parameter(Mandatory)][string]$FolderName,
         [switch]$ContinueOnError
     )
-    $stage = 'Assemblies'
-    Write-Step "CRM Assemblies ($($Assemblies.Count))"
+    $stage = if ($IsolationMode -eq 'None') { 'Non-Isolated Assemblies' } else { 'Sandbox Assemblies' }
+    Write-Step "$FolderName ($($Assemblies.Count))"
     if ($Assemblies.Count -eq 0) {
         Write-Info 'Nothing to update.'
         return
@@ -106,11 +138,8 @@ function Invoke-AssemblyDeployment {
         try {
             # Runs under -WhatIf too: the lookup is read-only and shows up front
             # whether each DLL can be updated.
-            $record = Find-RegisteredAssembly -Conn $Conn -Assembly $assembly
-            $change = "$($record.version) -> $($assembly.Version) ($($record.isolationmode))"
-            if ($record.isolationmode -and $record.isolationmode -ne 'Sandbox') {
-                Write-Warn "$item is registered with isolation mode '$($record.isolationmode)', not Sandbox."
-            }
+            $record = Find-RegisteredAssembly -Conn $Conn -Assembly $assembly -IsolationMode $IsolationMode
+            $change = "$($record.version) -> $($assembly.Version) ($IsolationMode)"
 
             if (-not $PSCmdlet.ShouldProcess("$item $change", 'Update plugin assembly')) {
                 Add-DeploymentResult -Stage $stage -Item $item -Status WhatIf -Detail "Would update $change"

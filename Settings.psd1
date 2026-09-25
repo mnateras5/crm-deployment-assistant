@@ -7,6 +7,7 @@
 #
 @{
     # Root of the deployment share. The script expects:
+    #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\CRM Non-Isolated Assemblies
     #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\CRM Solutions
     #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\CRM Assemblies
     #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\PS Scripts
@@ -15,11 +16,12 @@
     # Sub-folder names inside a ticket folder. Logs and Backups are created by
     # the script, so each ticket folder keeps its own audit trail.
     FolderNames = @{
-        Solutions  = 'CRM Solutions'
-        Assemblies = 'CRM Assemblies'
-        PSScripts  = 'PS Scripts'
-        Logs       = 'Logs'
-        Backups    = 'Backups'
+        NonIsolatedAssemblies = 'CRM Non-Isolated Assemblies'
+        Solutions             = 'CRM Solutions'
+        Assemblies            = 'CRM Assemblies'
+        PSScripts             = 'PS Scripts'
+        Logs                  = 'Logs'
+        Backups               = 'Backups'
     }
 
     Solutions = @{

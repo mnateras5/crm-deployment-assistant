@@ -7,11 +7,16 @@ Deploys one change-control ticket's CRM components to a target environment.
 Reads the ticket folder
     {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}
 and deploys, in this order:
-    1. CRM Solutions   - imports each unmanaged solution .zip, then publishes
-    2. CRM Assemblies  - updates already-registered plugin assemblies in place
-    3. PS Scripts      - copies scripts to {PSTargetLocation}\<relative path>
+    1. CRM Non-Isolated Assemblies - updates already-registered assemblies
+                                     with isolation mode None
+    2. CRM Solutions               - imports each unmanaged solution .zip,
+                                     then publishes
+    3. CRM Assemblies              - updates already-registered assemblies
+                                     with isolation mode Sandbox
+    4. PS Scripts                  - copies scripts to
+                                     {PSTargetLocation}\<relative path>
 
-A ticket does not need all three folders; missing or empty ones are skipped.
+A ticket does not need every folder; missing or empty ones are skipped.
 Everything is checked before anything is changed: the solution order,
 that the DLLs are signed .NET assemblies, the PS scripts target, and the
 CRM connection.
@@ -39,17 +44,21 @@ PROD only: the cluster (um1, um2, um3) hosting the org. Overrides the
 OrgClusters mapping in Settings.psd1.
 
 .PARAMETER Credential
-Credential for the CRM connection. Without it, the current Windows user
-is used (integrated AD authentication).
+Credential for the CRM connection. Without it, the PSServiceAccount
+credentials from $SecuritySettings are used (see Connect-CrmTarget in
+lib\Common.ps1).
 
 .PARAMETER SettingsPath
 Path to the settings file. Defaults to Settings.psd1 next to this script.
+
+.PARAMETER SkipNonIsolatedAssemblies
+Do not update the ticket's CRM non-isolated assemblies.
 
 .PARAMETER SkipSolutions
 Do not import the ticket's CRM solutions.
 
 .PARAMETER SkipAssemblies
-Do not update the ticket's CRM assemblies.
+Do not update the ticket's CRM (sandbox) assemblies.
 
 .PARAMETER SkipPSScripts
 Do not copy the ticket's PS scripts.
@@ -93,6 +102,7 @@ param(
 
     [string]$SettingsPath = (Join-Path $PSScriptRoot 'Settings.psd1'),
 
+    [switch]$SkipNonIsolatedAssemblies,
     [switch]$SkipSolutions,
     [switch]$SkipAssemblies,
     [switch]$SkipPSScripts,
@@ -146,6 +156,10 @@ try {
     # --- Check everything before changing anything ----------------------------
 
     Write-Step 'Pre-deployment checks'
+    $nonIsolatedAssemblies = @()
+    if (-not $SkipNonIsolatedAssemblies) {
+        $nonIsolatedAssemblies = @(Get-AssemblyPlan -Folder (Join-Path $ticketFolder $folders.NonIsolatedAssemblies))
+    }
     $solutions = @()
     if (-not $SkipSolutions) {
         $solutions = @(Get-SolutionPlan -Folder (Join-Path $ticketFolder $folders.Solutions) -SolutionSettings $settings.Solutions)
@@ -158,9 +172,14 @@ try {
     if (-not $SkipPSScripts) {
         $scripts = @(Get-PSScriptPlan -Folder (Join-Path $ticketFolder $folders.PSScripts) -TargetRoot $target.PSTargetLocation)
     }
-    Write-Info "Found $($solutions.Count) solution(s), $($assemblies.Count) assembly(ies), $($scripts.Count) PS script(s)."
+    Write-Info "Found $($nonIsolatedAssemblies.Count) non-isolated assembly(ies), $($solutions.Count) solution(s), $($assemblies.Count) sandbox assembly(ies), $($scripts.Count) PS script(s)."
 
-    if ($solutions.Count + $assemblies.Count + $scripts.Count -eq 0) {
+    $inBoth = @($nonIsolatedAssemblies | Where-Object { $name = $_.Name; @($assemblies | Where-Object { $_.Name -eq $name }).Count -gt 0 } | ForEach-Object { $_.File.Name })
+    if ($inBoth.Count -gt 0) {
+        throw "These assemblies are in both '$($folders.NonIsolatedAssemblies)' and '$($folders.Assemblies)'; keep each in one folder: $($inBoth -join ', ')"
+    }
+
+    if ($nonIsolatedAssemblies.Count + $solutions.Count + $assemblies.Count + $scripts.Count -eq 0) {
         Write-Warn 'Nothing to deploy.'
         return
     }
@@ -175,7 +194,7 @@ try {
     }
 
     $conn = $null
-    if ($solutions.Count + $assemblies.Count -gt 0) {
+    if ($nonIsolatedAssemblies.Count + $solutions.Count + $assemblies.Count -gt 0) {
         $conn = Connect-CrmTarget -Target $target -OrgName $OrgName -Credential $Credential
     }
     Write-Info 'Checks passed.'
@@ -190,9 +209,12 @@ try {
 
     # --- Deploy -------------------------------------------------------------------
 
-    Invoke-SolutionDeployment -Conn $conn -Solutions $solutions -SolutionSettings $settings.Solutions -ContinueOnError:$ContinueOnError
+    Invoke-AssemblyDeployment -Conn $conn -Assemblies $nonIsolatedAssemblies -IsolationMode None -FolderName $folders.NonIsolatedAssemblies -ContinueOnError:$ContinueOnError
     if (-not (Test-HasFailures) -or $ContinueOnError) {
-        Invoke-AssemblyDeployment -Conn $conn -Assemblies $assemblies -ContinueOnError:$ContinueOnError
+        Invoke-SolutionDeployment -Conn $conn -Solutions $solutions -SolutionSettings $settings.Solutions -ContinueOnError:$ContinueOnError
+    }
+    if (-not (Test-HasFailures) -or $ContinueOnError) {
+        Invoke-AssemblyDeployment -Conn $conn -Assemblies $assemblies -IsolationMode Sandbox -FolderName $folders.Assemblies -ContinueOnError:$ContinueOnError
     }
     if (-not (Test-HasFailures) -or $ContinueOnError) {
         Invoke-PSScriptDeployment -Scripts $scripts -BackupRoot $backupRoot -ContinueOnError:$ContinueOnError
