@@ -41,12 +41,15 @@
 
     # The Setup entity updated from the "Setup Data" CSV files (columns ID,
     # Name, Value). A row is matched on IdAttribute, else on NameAttribute,
-    # and only ValueAttribute is updated.
+    # and only ValueAttribute is updated. Names are from the mm360_setup
+    # entity's schema.
     SetupData = @{
         EntityLogicalName = 'mm360_setup'
         IdAttribute       = 'mm360_setupid'
         NameAttribute     = 'mm360_name'
         ValueAttribute    = 'mm360_value'
+        # mm360_value is a single line of text, max 500 characters.
+        ValueMaxLength    = 500
     }
 
     # One entry per target environment (the -Environment parameter).

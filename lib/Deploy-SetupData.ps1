@@ -11,9 +11,12 @@ function Get-SetupDataPlan {
     .SYNOPSIS
     Reads every .csv in the folder and returns one entry per row, or throws
     if a file lacks the ID/Name/Value columns, a row has no key, an ID is
-    not a GUID, or the same key appears twice.
+    not a GUID, a value is too long, or the same key appears twice.
     #>
-    param([Parameter(Mandatory)][string]$Folder)
+    param(
+        [Parameter(Mandatory)][string]$Folder,
+        [Parameter(Mandatory)][hashtable]$SetupSettings
+    )
 
     $files = @(Get-StageFiles -Path $Folder -Filter '*.csv')
     $plan = @()
@@ -47,6 +50,9 @@ function Get-SetupDataPlan {
             if ($idText -and -not [guid]::TryParse($idText, [ref]$id)) {
                 $problems += "${where}: ID '$idText' is not a GUID"
                 continue
+            }
+            if ($value.Length -gt $SetupSettings.ValueMaxLength) {
+                $problems += "${where}: Value is $($value.Length) characters; $($SetupSettings.ValueAttribute) holds at most $($SetupSettings.ValueMaxLength)"
             }
             if ($idText) {
                 if ($seenIds.ContainsKey($id)) { $problems += "${where}: ID $id is also on $($seenIds[$id])" }

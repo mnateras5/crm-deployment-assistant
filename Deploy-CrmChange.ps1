@@ -176,7 +176,7 @@ try {
     }
     $setupRows = @()
     if (-not $SkipSetupData) {
-        $setupRows = @(Get-SetupDataPlan -Folder (Join-Path $ticketFolder $folders.SetupData))
+        $setupRows = @(Get-SetupDataPlan -Folder (Join-Path $ticketFolder $folders.SetupData) -SetupSettings $settings.SetupData)
     }
     $scripts = @()
     if (-not $SkipPSScripts) {
