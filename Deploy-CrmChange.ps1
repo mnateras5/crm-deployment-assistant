@@ -13,7 +13,9 @@ and deploys, in this order:
                                      then publishes
     3. CRM Assemblies              - updates already-registered assemblies
                                      with isolation mode Sandbox
-    4. PS Scripts                  - copies scripts to
+    4. Setup Data                  - updates Value on existing Setup records
+                                     from the folder's CSV files
+    5. PS Scripts                  - copies scripts to
                                      {PSTargetLocation}\<relative path>
 
 A ticket does not need every folder; missing or empty ones are skipped.
@@ -60,6 +62,9 @@ Do not import the ticket's CRM solutions.
 .PARAMETER SkipAssemblies
 Do not update the ticket's CRM (sandbox) assemblies.
 
+.PARAMETER SkipSetupData
+Do not update the ticket's Setup entity records.
+
 .PARAMETER SkipPSScripts
 Do not copy the ticket's PS scripts.
 
@@ -105,6 +110,7 @@ param(
     [switch]$SkipNonIsolatedAssemblies,
     [switch]$SkipSolutions,
     [switch]$SkipAssemblies,
+    [switch]$SkipSetupData,
     [switch]$SkipPSScripts,
     [switch]$ContinueOnError,
     [switch]$Force
@@ -113,7 +119,7 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-foreach ($lib in 'Common', 'Deploy-Solutions', 'Deploy-Assemblies', 'Deploy-PSScripts') {
+foreach ($lib in 'Common', 'Deploy-Solutions', 'Deploy-Assemblies', 'Deploy-SetupData', 'Deploy-PSScripts') {
     . (Join-Path $PSScriptRoot "lib\$lib.ps1")
 }
 
@@ -168,18 +174,22 @@ try {
     if (-not $SkipAssemblies) {
         $assemblies = @(Get-AssemblyPlan -Folder (Join-Path $ticketFolder $folders.Assemblies))
     }
+    $setupRows = @()
+    if (-not $SkipSetupData) {
+        $setupRows = @(Get-SetupDataPlan -Folder (Join-Path $ticketFolder $folders.SetupData))
+    }
     $scripts = @()
     if (-not $SkipPSScripts) {
         $scripts = @(Get-PSScriptPlan -Folder (Join-Path $ticketFolder $folders.PSScripts) -TargetRoot $target.PSTargetLocation)
     }
-    Write-Info "Found $($nonIsolatedAssemblies.Count) non-isolated assembly(ies), $($solutions.Count) solution(s), $($assemblies.Count) sandbox assembly(ies), $($scripts.Count) PS script(s)."
+    Write-Info "Found $($nonIsolatedAssemblies.Count) non-isolated assembly(ies), $($solutions.Count) solution(s), $($assemblies.Count) sandbox assembly(ies), $($setupRows.Count) setup row(s), $($scripts.Count) PS script(s)."
 
     $inBoth = @($nonIsolatedAssemblies | Where-Object { $name = $_.Name; @($assemblies | Where-Object { $_.Name -eq $name }).Count -gt 0 } | ForEach-Object { $_.File.Name })
     if ($inBoth.Count -gt 0) {
         throw "These assemblies are in both '$($folders.NonIsolatedAssemblies)' and '$($folders.Assemblies)'; keep each in one folder: $($inBoth -join ', ')"
     }
 
-    if ($nonIsolatedAssemblies.Count + $solutions.Count + $assemblies.Count + $scripts.Count -eq 0) {
+    if ($nonIsolatedAssemblies.Count + $solutions.Count + $assemblies.Count + $setupRows.Count + $scripts.Count -eq 0) {
         Write-Warn 'Nothing to deploy.'
         return
     }
@@ -194,7 +204,7 @@ try {
     }
 
     $conn = $null
-    if ($nonIsolatedAssemblies.Count + $solutions.Count + $assemblies.Count -gt 0) {
+    if ($nonIsolatedAssemblies.Count + $solutions.Count + $assemblies.Count + $setupRows.Count -gt 0) {
         $conn = Connect-CrmTarget -Target $target -OrgName $OrgName -Credential $Credential
     }
     Write-Info 'Checks passed.'
@@ -215,6 +225,9 @@ try {
     }
     if (-not (Test-HasFailures) -or $ContinueOnError) {
         Invoke-AssemblyDeployment -Conn $conn -Assemblies $assemblies -IsolationMode Sandbox -FolderName $folders.Assemblies -ContinueOnError:$ContinueOnError
+    }
+    if (-not (Test-HasFailures) -or $ContinueOnError) {
+        Invoke-SetupDataDeployment -Conn $conn -Rows $setupRows -SetupSettings $settings.SetupData -FolderName $folders.SetupData -ContinueOnError:$ContinueOnError
     }
     if (-not (Test-HasFailures) -or $ContinueOnError) {
         Invoke-PSScriptDeployment -Scripts $scripts -BackupRoot $backupRoot -ContinueOnError:$ContinueOnError

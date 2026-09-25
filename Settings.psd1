@@ -10,6 +10,7 @@
     #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\CRM Non-Isolated Assemblies
     #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\CRM Solutions
     #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\CRM Assemblies
+    #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\Setup Data
     #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\PS Scripts
     CRMDeployments = '\\turningpoint-healthcare.com\it\Application Development\CRM Deployments'
 
@@ -19,6 +20,7 @@
         NonIsolatedAssemblies = 'CRM Non-Isolated Assemblies'
         Solutions             = 'CRM Solutions'
         Assemblies            = 'CRM Assemblies'
+        SetupData             = 'Setup Data'
         PSScripts             = 'PS Scripts'
         Logs                  = 'Logs'
         Backups               = 'Backups'
@@ -35,6 +37,16 @@
         MaxWaitTimeInSeconds             = 1800
         # Publish all customizations once, after the last solution is imported.
         PublishAfterImport               = $true
+    }
+
+    # The Setup entity updated from the "Setup Data" CSV files (columns ID,
+    # Name, Value). A row is matched on IdAttribute, else on NameAttribute,
+    # and only ValueAttribute is updated.
+    SetupData = @{
+        EntityLogicalName = 'mm360_setup'
+        IdAttribute       = 'mm360_setupid'
+        NameAttribute     = 'mm360_name'
+        ValueAttribute    = 'mm360_value'
     }
 
     # One entry per target environment (the -Environment parameter).

@@ -18,6 +18,7 @@ lists what would change, without changing anything.
     CRM Non-Isolated Assemblies\  DLLs registered with isolation mode None
     CRM Solutions\                unmanaged solution .zip files (+ optional order.txt)
     CRM Assemblies\               DLLs registered with isolation mode Sandbox
+    Setup Data\                   CSV files (ID, Name, Value) for the Setup entity
     PS Scripts\                   scripts, laid out relative to PSTargetLocation
     Logs\                         created by the script: one log per run
     Backups\                      created by the script: PS scripts it overwrote
@@ -48,7 +49,15 @@ it uses; missing or empty ones are skipped.
    this script. The registered isolation mode must match the folder the DLL
    is in (None or Sandbox); the script never changes it. A DLL can't be in
    both assembly folders.
-5. **PS Scripts.** Copies each file to `{PSTargetLocation}\<relative path>`,
+5. **Setup Data.** For each row of each `.csv` (columns `ID`, `Name`,
+   `Value`, e.g. an Advanced Find export of Setup saved as CSV), finds the
+   Setup record by `ID`, or by `Name` when no record has that ID (IDs usually
+   differ between environments), and updates its value. If both are given
+   and point at different records, the row fails. Records are never
+   created. A value that differs only in upper/lower case (`true` vs `TRUE`
+   after an Excel round trip) counts as unchanged. The Setup entity's
+   schema names are under `SetupData` in `Settings.psd1`.
+6. **PS Scripts.** Copies each file to `{PSTargetLocation}\<relative path>`,
    e.g. `PS Scripts\Orgs\Fidelis\Foo.ps1` goes to
    `\\tps-dev-xrmwf3\c$\inetpub\poshweb\scripts-root\Orgs\Fidelis\Foo.ps1`.
    Identical files are skipped; a file about to be overwritten is first
@@ -69,7 +78,7 @@ table is printed at the end and the script exits with code 1 on any failure.
 | `-Cluster` | PROD only: `um1`, `um2` or `um3`; overrides `OrgClusters` in settings |
 | `-Credential` | CRM credential; default is the `PSServiceAccount` from `$SecuritySettings` |
 | `-WhatIf` | Dry run |
-| `-SkipNonIsolatedAssemblies`, `-SkipSolutions`, `-SkipAssemblies`, `-SkipPSScripts` | Skip a stage (`-SkipAssemblies` is the Sandbox one) |
+| `-SkipNonIsolatedAssemblies`, `-SkipSolutions`, `-SkipAssemblies`, `-SkipSetupData`, `-SkipPSScripts` | Skip a stage (`-SkipAssemblies` is the Sandbox one) |
 | `-ContinueOnError` | Keep going after a failed item |
 | `-Force` | Skip the PROD confirmation prompt |
 | `-SettingsPath` | Alternative settings file |
