@@ -72,3 +72,83 @@ function Get-StageFiles {
     }
     return @(Get-ChildItem -LiteralPath $Path -Filter $Filter -File -Recurse:$Recurse | Sort-Object FullName)
 }
+
+function Get-TurningPointCrmCredentials(){
+	$UserName = $SecuritySettings.PSServiceAccount
+	$Password =  $SecuritySettings.PSServiceAccountPassword
+	New-Object System.Management.Automation.PSCredential ($UserName, $Password)
+}
+
+function Connect-CrmTarget {
+    param(
+        [Parameter(Mandatory)]$Target,
+        [Parameter(Mandatory)][string]$OrgName,
+        [System.Management.Automation.PSCredential]$Credential
+    )
+    if ($PSVersionTable.PSEdition -ne 'Desktop') {
+        throw 'Microsoft.Xrm.Data.PowerShell needs Windows PowerShell 5.1 (powershell.exe), not PowerShell 7 (pwsh.exe).'
+    }
+    if (-not (Get-Module -ListAvailable -Name Microsoft.Xrm.Data.PowerShell)) {
+        throw 'Module Microsoft.Xrm.Data.PowerShell is not installed. Run: Install-Module Microsoft.Xrm.Data.PowerShell -Scope CurrentUser'
+    }
+    Import-Module Microsoft.Xrm.Data.PowerShell -ErrorAction Stop
+
+    Write-Info "Connecting to $($Target.OrgUrl) ..."
+    if ($Credential) {
+        $conn = Connect-CrmOnPremDiscovery -ServerUrl $Target.ServerUrl -OrganizationName $OrgName -Credential $Credential -ErrorAction Stop
+    } else {
+        #$conn = Get-CrmConnection -ConnectionString "AuthType=AD;Url=$($Target.OrgUrl)" -ErrorAction Stop
+        $Credential = Get-TurningPointCrmCredentials
+        $conn = Connect-CrmOnPremDiscovery -ServerUrl $Target.ServerUrl -OrganizationName $OrgName -Credential $Credential -ErrorAction Stop
+    }
+    if (-not $conn -or -not $conn.IsReady) {
+        $reason = if ($conn) { $conn.LastCrmError } else { 'no connection returned' }
+        throw "Could not connect to $($Target.OrgUrl): $reason"
+    }
+    Write-Info "Connected to $($conn.ConnectedOrgFriendlyName) ($($conn.ConnectedOrgVersion))."
+    return $conn
+}
+
+
+function Resolve-EnvironmentSettings {
+    <#
+    .SYNOPSIS
+    Returns the environment's CRM server URL, org URL and PS scripts location,
+    with the {Cluster} token resolved.
+    #>
+    param(
+        [Parameter(Mandatory)][hashtable]$Settings,
+        [Parameter(Mandatory)][string]$Environment,
+        [Parameter(Mandatory)][string]$OrgName,
+        [string]$Cluster
+    )
+    $envSettings = $Settings.Environments[$Environment]
+    if (-not $envSettings) {
+        throw "Settings.psd1 has no '$Environment' entry under Environments."
+    }
+    $serverUrl = $envSettings.CrmServerUrl
+    $psTarget = $envSettings.PSTargetLocation
+
+    if ("$serverUrl$psTarget" -match '\{Cluster\}') {
+        if (-not $Cluster) {
+            $clusters = $envSettings['OrgClusters']
+            if ($clusters -and $clusters.ContainsKey($OrgName)) {
+                $Cluster = $clusters[$OrgName]
+            }
+        }
+        if (-not $Cluster) {
+            throw "No $Environment cluster is known for org '$OrgName'. Add it to OrgClusters in Settings.psd1 or pass -Cluster."
+        }
+        $serverUrl = $serverUrl.Replace('{Cluster}', $Cluster)
+        $psTarget = $psTarget.Replace('{Cluster}', $Cluster)
+    }
+
+    return [pscustomobject]@{
+        ServerUrl        = $serverUrl.TrimEnd('/')
+        OrgUrl           = "$($serverUrl.TrimEnd('/'))/$OrgName"
+        PSTargetLocation = $psTarget
+        Cluster          = $Cluster
+    }
+}
+
+
