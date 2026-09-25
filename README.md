@@ -75,8 +75,8 @@ and per environment the CRM server URL and `PSTargetLocation`. PROD is spread
 over three clusters (`um1`, `um2`, `um3`), so its URL uses a `{Cluster}` token
 and `OrgClusters` maps each client to its cluster.
 
-Before the first PROD run, fill in the two `TODO`s in `Settings.psd1`: the
-PROD `PSTargetLocation` and the `OrgClusters` mapping.
+Before the first PROD run, fill in the `OrgClusters` mapping (the `TODO` in
+`Settings.psd1`), or pass `-Cluster` on each PROD run.
 
 ## Requirements
 

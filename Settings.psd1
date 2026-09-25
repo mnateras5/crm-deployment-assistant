@@ -54,9 +54,8 @@
         }
         PROD = @{
             CrmServerUrl     = 'http://{Cluster}.turningpoint-healthcare.com'
-            # TODO: set the PROD PowerShell scripts location. If it differs per
-            # cluster, use the {Cluster} token, e.g. '\\tps-{Cluster}-xrmwf\c$\...'.
-            PSTargetLocation = 'TODO'
+            # One scripts server for all PROD clusters.
+            PSTargetLocation = '\\tps-prd-xrmwf1\c$\inetpub\poshweb\scripts-root'
             # Which PROD cluster (um1, um2 or um3) hosts each client's org.
             # TODO: fill in the real client-to-cluster mapping.
             OrgClusters = @{
