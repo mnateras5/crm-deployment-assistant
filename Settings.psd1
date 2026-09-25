@@ -57,9 +57,19 @@
             # One scripts server for all PROD clusters.
             PSTargetLocation = '\\tps-prd-xrmwf1\c$\inetpub\poshweb\scripts-root'
             # Which PROD cluster (um1, um2 or um3) hosts each client's org.
-            # TODO: fill in the real client-to-cluster mapping.
+            # Org names are matched case-insensitively.
             OrgClusters = @{
-                # Fidelis = 'um1'
+                BCBSKC     = 'um1'
+                BCBSM      = 'um3'
+                BCBSTN     = 'um3'
+                CapitalPA  = 'um2'
+                CareSource = 'um1'
+                Centene    = 'um2'
+                Fidelis    = 'um2'
+                HAP        = 'um1'
+                HorizonNJ  = 'um2'
+                Priority   = 'um1'
+                WellCare   = 'um2'
             }
         }
     }
