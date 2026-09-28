@@ -4,8 +4,8 @@ Deploys one change-control ticket's CRM components to DEV, UAT or PROD with a
 single PowerShell command.
 
 ```powershell
-.\Deploy-CrmChange.ps1 -Environment DEV -OrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322 -WhatIf
-.\Deploy-CrmChange.ps1 -Environment DEV -OrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322
+.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322 -WhatIf
+.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322
 ```
 
 Always run with `-WhatIf` first: it checks the ticket, connects to CRM and
@@ -72,7 +72,8 @@ table is printed at the end and the script exits with code 1 on any failure.
 | Parameter | Description |
 |---|---|
 | `-Environment` | `DEV`, `UAT` or `PROD` |
-| `-OrgName` | CRM org = client name, e.g. `Fidelis` |
+| `-TargetOrgName` | CRM org to deploy to = client name, e.g. `Fidelis` |
+| `-SourceOrgName` | Org the package was built for; defaults to `-TargetOrgName`. See below |
 | `-DeploymentDate` | Date folder, `yyyy-MM-dd` |
 | `-ChangeControlTicket` | Ticket folder, e.g. `CC-3322` |
 | `-Cluster` | PROD only: `um1`, `um2` or `um3`; overrides `OrgClusters` in settings |
@@ -82,6 +83,23 @@ table is printed at the end and the script exits with code 1 on any failure.
 | `-ContinueOnError` | Keep going after a failed item |
 | `-Force` | Skip the PROD confirmation prompt |
 | `-SettingsPath` | Alternative settings file |
+
+## Deploying a package to a different org
+
+To deploy a ticket built for one org to another, pass both org names:
+
+```powershell
+.\Deploy-CrmChange.ps1 -Environment DEV -SourceOrgName Fidelis -TargetOrgName Centene -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322 -WhatIf
+```
+
+- **PS Scripts:** a folder named after the source org is renamed to the
+  target org, so `PS Scripts\Orgs\Fidelis\Foo.ps1` goes to
+  `{PSTargetLocation}\Orgs\Centene\Foo.ps1`. File names are never changed.
+  A script under `Orgs\` of any other org stops the run, since it can't
+  be redirected.
+- **Setup Data:** record IDs differ between orgs, so rows fall back to
+  matching on Name.
+- **Solutions and assemblies** are deployed as they are.
 
 ## Settings (`Settings.psd1`)
 

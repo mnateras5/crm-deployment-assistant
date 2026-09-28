@@ -32,8 +32,15 @@ live in Settings.psd1 next to this script.
 .PARAMETER Environment
 Target environment: DEV, UAT or PROD.
 
-.PARAMETER OrgName
-The CRM organization, which is the client name, e.g. Fidelis.
+.PARAMETER TargetOrgName
+The CRM organization to deploy to, which is the client name, e.g. Fidelis.
+
+.PARAMETER SourceOrgName
+The org the package was built for. Defaults to TargetOrgName. Set it to
+deploy a package built for one org to another: PS scripts in a folder
+named after the source org (e.g. Orgs\Fidelis) go to the target org's
+folder instead (Orgs\Centene), and Setup Data rows are matched by Name
+when their IDs don't exist in the target org.
 
 .PARAMETER DeploymentDate
 The deployment date folder, e.g. 2026-09-30.
@@ -75,12 +82,17 @@ Keep going after an item fails. By default the run stops at the first failure.
 Skip the confirmation prompt for PROD.
 
 .EXAMPLE
-.\Deploy-CrmChange.ps1 -Environment DEV -OrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322 -WhatIf
+.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322 -WhatIf
 
 Dry run: checks the ticket, connects to CRM and lists what would change.
 
 .EXAMPLE
-.\Deploy-CrmChange.ps1 -Environment DEV -OrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322
+.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322
+
+.EXAMPLE
+.\Deploy-CrmChange.ps1 -Environment DEV -SourceOrgName Fidelis -TargetOrgName Centene -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322 -WhatIf
+
+Deploys the CC-3322 package, built for Fidelis, to the Centene org.
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -90,7 +102,10 @@ param(
 
     [Parameter(Mandatory)]
     [ValidatePattern('^[\w\-]+$')]
-    [string]$OrgName,
+    [string]$TargetOrgName,
+
+    [ValidatePattern('^[\w\-]+$')]
+    [string]$SourceOrgName,
 
     [Parameter(Mandatory)]
     [ValidatePattern('^\d{4}-\d{2}-\d{2}$')]
@@ -130,7 +145,8 @@ if (-not (Test-Path -LiteralPath $SettingsPath -PathType Leaf)) {
     throw "Settings file not found: $SettingsPath"
 }
 $settings = Import-PowerShellDataFile -LiteralPath $SettingsPath
-$target = Resolve-EnvironmentSettings -Settings $settings -Environment $Environment -OrgName $OrgName -Cluster $Cluster
+if (-not $SourceOrgName) { $SourceOrgName = $TargetOrgName }
+$target = Resolve-EnvironmentSettings -Settings $settings -Environment $Environment -OrgName $TargetOrgName -Cluster $Cluster
 $folders = $settings.FolderNames
 
 $ticketFolder = Join-Path (Join-Path $settings.CRMDeployments $DeploymentDate) $ChangeControlTicket
@@ -139,7 +155,7 @@ if (-not (Test-Path -LiteralPath $ticketFolder -PathType Container)) {
 }
 
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$runName = "${Environment}_${OrgName}_$stamp"
+$runName = "${Environment}_${TargetOrgName}_$stamp"
 if ($WhatIfPreference) { $runName += '_WhatIf' }
 $logFolder = Join-Path $ticketFolder $folders.Logs
 $logFile = Join-Path $logFolder "$runName.log"
@@ -155,6 +171,7 @@ try {
     Write-Info "Source:      $ticketFolder"
     Write-Info "Environment: $Environment$(if ($target.Cluster) { " (cluster $($target.Cluster))" })"
     Write-Info "CRM org:     $($target.OrgUrl)"
+    if ($SourceOrgName -ne $TargetOrgName) { Write-Info "Package org: $SourceOrgName (deploying to $TargetOrgName)" }
     Write-Info "PS scripts:  $($target.PSTargetLocation)"
     Write-Info "Run by:      $([Environment]::UserDomainName)\$([Environment]::UserName) on $([Environment]::MachineName)"
     if ($WhatIfPreference) { Write-Info 'Mode:        WhatIf (nothing will be changed)' }
@@ -180,7 +197,7 @@ try {
     }
     $scripts = @()
     if (-not $SkipPSScripts) {
-        $scripts = @(Get-PSScriptPlan -Folder (Join-Path $ticketFolder $folders.PSScripts) -TargetRoot $target.PSTargetLocation)
+        $scripts = @(Get-PSScriptPlan -Folder (Join-Path $ticketFolder $folders.PSScripts) -TargetRoot $target.PSTargetLocation -SourceOrgName $SourceOrgName -TargetOrgName $TargetOrgName)
     }
     Write-Info "Found $($nonIsolatedAssemblies.Count) non-isolated assembly(ies), $($solutions.Count) solution(s), $($assemblies.Count) sandbox assembly(ies), $($setupRows.Count) setup row(s), $($scripts.Count) PS script(s)."
 
@@ -205,12 +222,12 @@ try {
 
     $conn = $null
     if ($nonIsolatedAssemblies.Count + $solutions.Count + $assemblies.Count + $setupRows.Count -gt 0) {
-        $conn = Connect-CrmTarget -Target $target -OrgName $OrgName -Credential $Credential
+        $conn = Connect-CrmTarget -Target $target -OrgName $TargetOrgName -Credential $Credential
     }
     Write-Info 'Checks passed.'
 
     if ($Environment -eq 'PROD' -and -not $WhatIfPreference -and -not $Force) {
-        $question = "Deploy $ChangeControlTicket to PROD org $OrgName ($($target.OrgUrl))?"
+        $question = "Deploy $ChangeControlTicket to PROD org $TargetOrgName ($($target.OrgUrl))?"
         if (-not $PSCmdlet.ShouldContinue($question, 'PROD deployment')) {
             Write-Warn 'Cancelled by user.'
             return
