@@ -6,12 +6,13 @@
 # arrays) and never runs code. Do not put credentials in here.
 #
 @{
-    # Root of the deployment share. The script expects:
-    #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\CRM Non-Isolated Assemblies
-    #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\CRM Solutions
-    #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\CRM Assemblies
-    #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\Setup Data
-    #   {CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\PS Scripts
+    # Root of the deployment share. The script expects, per org and ticket
+    # (ticket folders numbered in deployment order, e.g. "1. CC-3554"):
+    #   {CRMDeployments}\{DeploymentDate}\{Org}\{N. Ticket}\CRM Non-Isolated Assemblies
+    #   {CRMDeployments}\{DeploymentDate}\{Org}\{N. Ticket}\CRM Solutions
+    #   {CRMDeployments}\{DeploymentDate}\{Org}\{N. Ticket}\CRM Assemblies
+    #   {CRMDeployments}\{DeploymentDate}\{Org}\{N. Ticket}\Setup Data
+    #   {CRMDeployments}\{DeploymentDate}\{Org}\{N. Ticket}\PS Scripts
     CRMDeployments = '\\turningpoint-healthcare.com\it\Application Development\CRM Deployments'
 
     # Sub-folder names inside a ticket folder. Logs and Backups are created by

@@ -2,6 +2,8 @@
 # the end-of-run summary. Dot-sourced by Deploy-CrmChange.ps1.
 
 $script:DeploymentResults = New-Object System.Collections.Generic.List[object]
+# The ticket folder being deployed; stamped on each result.
+$script:CurrentTicket = ''
 
 function Write-Step {
     param([Parameter(Mandatory)][string]$Message)
@@ -32,6 +34,7 @@ function Add-DeploymentResult {
         [string]$Detail = ''
     )
     $script:DeploymentResults.Add([pscustomobject]@{
+        Ticket = $script:CurrentTicket
         Stage  = $Stage
         Item   = $Item
         Status = $Status
