@@ -1,20 +1,40 @@
 # CRM Deployment Assistant
 
-Deploys one change-control ticket's CRM components to DEV, UAT or PROD with a
-single PowerShell command.
+Deploys change-control tickets' CRM components to DEV, UAT or PROD with a
+single PowerShell command: one ticket, or every ticket of an org for a date.
 
 ```powershell
-.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322 -WhatIf
-.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322
+# One ticket
+.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3554 -WhatIf
+.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3554
+
+# Every Fidelis ticket for the date, in number order
+.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -DeployAll -WhatIf
 ```
 
-Always run with `-WhatIf` first: it checks the ticket, connects to CRM and
+Always run with `-WhatIf` first: it checks the tickets, connects to CRM and
 lists what would change, without changing anything.
 
-## Ticket folder layout
+## Folder layout
 
 ```
-{CRMDeployments}\{DeploymentDate}\{ChangeControlTicket}\
+{CRMDeployments}\{DeploymentDate}\{Org}\
+    1. CC-3554\     ticket folders, numbered in deployment order
+    2. CC-3560\
+    Logs\           created by -DeployAll runs: one log per run
+```
+
+`{Org}` is the org the tickets were built for (`-SourceOrgName`, which
+defaults to `-TargetOrgName`). Tickets are deployed in number order, so
+`10.` comes after `9.` without zero-padding. `-ChangeControlTicket CC-3554`
+finds `1. CC-3554`. With `-DeployAll`, every ticket folder must be numbered,
+and no number or ticket may appear twice; otherwise the run stops before
+changing anything.
+
+Inside each ticket folder:
+
+```
+{N. Ticket}\
     CRM Non-Isolated Assemblies\  DLLs registered with isolation mode None
     CRM Solutions\                unmanaged solution .zip files (+ optional order.txt)
     CRM Assemblies\               DLLs registered with isolation mode Sandbox
@@ -29,9 +49,15 @@ it uses; missing or empty ones are skipped.
 
 ## What it does, in order
 
-1. **Checks everything first.** Solution order, DLLs (must be strong-name
-   signed .NET assemblies), PS scripts target reachable, CRM connection.
-   Nothing is changed if any check fails.
+1. **Checks everything first, for every ticket in the run.** Ticket
+   folders, solution order, DLLs (must be strong-name signed .NET
+   assemblies), Setup CSVs, PS scripts target reachable, CRM connection.
+   Nothing is changed if any check fails. With `-DeployAll`, it also warns
+   about components that more than one ticket deploys (the later ticket
+   wins).
+
+Then, one ticket at a time, in number order:
+
 2. **CRM Non-Isolated Assemblies.** Updates assemblies registered with
    isolation mode **None**, the same way as step 4. They go first, before
    the solutions.
@@ -64,8 +90,14 @@ it uses; missing or empty ones are skipped.
    copied to `{Ticket}\Backups\<run>\PS Scripts\...`.
 
 The run stops at the first failure unless `-ContinueOnError` is passed; if
-some solutions were already imported, they are still published. A summary
-table is printed at the end and the script exits with code 1 on any failure.
+some solutions were already imported, they are still published. With
+`-DeployAll`, the tickets after a failed one are not deployed (they show as
+Skipped). A summary table is printed at the end and the script exits with
+code 1 on any failure.
+
+A single-ticket run logs to `{Ticket}\Logs`. A `-DeployAll` run logs to
+`{Org}\Logs`, and each ticket's part of the summary is also written to
+that ticket's `Logs` folder.
 
 ## Parameters
 
@@ -75,7 +107,8 @@ table is printed at the end and the script exits with code 1 on any failure.
 | `-TargetOrgName` | CRM org to deploy to = client name, e.g. `Fidelis` |
 | `-SourceOrgName` | Org the package was built for; defaults to `-TargetOrgName`. See below |
 | `-DeploymentDate` | Date folder, `yyyy-MM-dd` |
-| `-ChangeControlTicket` | Ticket folder, e.g. `CC-3322` |
+| `-ChangeControlTicket` | One ticket, e.g. `CC-3554` (finds `1. CC-3554`) |
+| `-DeployAll` | Every ticket in the org folder, in number order. Use instead of `-ChangeControlTicket` |
 | `-Cluster` | PROD only: `um1`, `um2` or `um3`; overrides `OrgClusters` in settings |
 | `-Credential` | CRM credential; default is the `PSServiceAccount` from `$SecuritySettings` |
 | `-WhatIf` | Dry run |
