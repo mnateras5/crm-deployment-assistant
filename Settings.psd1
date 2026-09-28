@@ -63,11 +63,11 @@
     Environments = @{
         DEV = @{
             CrmServerUrl     = 'http://tpsdevdynfe101.turningpoint-healthcare.com'
-            PSTargetLocation = '\\tps-dev-xrmwf3\c$\inetpub\poshweb\scripts-root'
+            PSTargetLocation = '\\tps-dev-xrmwf3\c$\inetpub\wwwroot\poshweb\scripts-root'
         }
         UAT = @{
             CrmServerUrl     = 'http://um1-uat.turningpoint-healthcare.com'
-            PSTargetLocation = '\\tps-uat-xrmwf2\c$\inetpub\poshweb\scripts-root'
+            PSTargetLocation = '\\tps-uat-xrmwf2\c$\inetpub\wwwroot\poshweb\scripts-root'
         }
         PROD = @{
             CrmServerUrl     = 'http://{Cluster}.turningpoint-healthcare.com'
