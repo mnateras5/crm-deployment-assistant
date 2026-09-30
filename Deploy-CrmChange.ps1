@@ -4,14 +4,18 @@
 Deploys change-control tickets' CRM components to a target environment.
 
 .DESCRIPTION
-Ticket folders live under an org folder, numbered in deployment order:
-    {CRMDeployments}\{DeploymentDate}\{Org}\1. CC-3554
-    {CRMDeployments}\{DeploymentDate}\{Org}\2. CC-3560
-{Org} is the org the packages were built for (SourceOrgName, which
-defaults to TargetOrgName).
+Ticket folders live under a release and an org folder, numbered in
+deployment order:
+    {CRMDeployments}\{DeploymentDate}\{Release}\{Org}\1. CC-3554
+    {CRMDeployments}\{DeploymentDate}\{Release}\{Org}\2. CC-3560
+{Release} separates releases on the same day (e.g. R1 by day, R2 at night).
+{Org} is the CRM organization the tickets deploy to, so the folder name
+must match the org name exactly.
 
--ChangeControlTicket deploys one ticket; -DeployAll deploys every ticket
-in the org folder in number order, one ticket at a time.
+-ChangeControlTicket deploys one ticket (found in whichever org folder has
+it); -DeployAll deploys every ticket of every org in the release: orgs in
+alphabetical order, each org's tickets in number order, one ticket at a
+time.
 
 Each ticket's components are deployed in this order:
     1. CRM Non-Isolated Assemblies - updates already-registered assemblies
@@ -27,13 +31,14 @@ Each ticket's components are deployed in this order:
 
 A ticket does not need every folder; missing or empty ones are skipped.
 Everything, for every ticket, is checked before anything is changed: the
-ticket folders, the solution order, that the DLLs are signed .NET
-assemblies, the Setup CSVs, the PS scripts target, and the CRM connection.
-The run stops at the first failure, and later tickets are not deployed.
+ticket folders, each org's CRM URL and connection, the solution order,
+that the DLLs are signed .NET assemblies, the Setup CSVs and the PS
+scripts target. The run stops at the first failure, and later tickets are
+not deployed.
 
-A single-ticket run logs to {Ticket}\Logs. A -DeployAll run logs to
-{Org}\Logs and also writes each ticket's part of the summary to that
-ticket's Logs folder. PS scripts that get overwritten are backed up to
+A run of one ticket logs to {Ticket}\Logs. A run of several tickets
+(-DeployAll, or a ticket found in several orgs) logs to {Release}\Logs and
+also writes each ticket's part of the summary to that ticket's Logs folder. PS scripts that get overwritten are backed up to
 {Ticket}\Backups first.
 
 Static settings (share root, CRM URLs, PS scripts locations, PROD clusters)
@@ -42,30 +47,25 @@ live in Settings.psd1 next to this script.
 .PARAMETER Environment
 Target environment: DEV, UAT or PROD.
 
-.PARAMETER TargetOrgName
-The CRM organization to deploy to, which is the client name, e.g. Fidelis.
-
-.PARAMETER SourceOrgName
-The org the package was built for. Defaults to TargetOrgName. Set it to
-deploy a package built for one org to another: PS scripts in a folder
-named after the source org (e.g. Orgs\Fidelis) go to the target org's
-folder instead (Orgs\Centene), and Setup Data rows are matched by Name
-when their IDs don't exist in the target org.
-
 .PARAMETER DeploymentDate
 The deployment date folder, e.g. 2026-09-30.
 
+.PARAMETER Release
+The release folder under the date, e.g. R1 or R2.
+
 .PARAMETER ChangeControlTicket
 The ticket to deploy, e.g. CC-3554. Matches the folder "1. CC-3554" (or a
-folder named exactly CC-3554).
+folder named exactly CC-3554) in any org folder of the release; if several
+orgs have that ticket, it is deployed to each of them.
 
 .PARAMETER DeployAll
-Deploy every ticket folder under the org folder, in number order. Every
-ticket folder must be numbered ("1. CC-3554").
+Deploy every ticket of every org in the release. Every ticket folder must
+be numbered ("1. CC-3554").
 
 .PARAMETER Cluster
 PROD only: the cluster (um1, um2, um3) hosting the org. Overrides the
-OrgClusters mapping in Settings.psd1.
+OrgClusters mapping in Settings.psd1. Only allowed when the run deploys to
+a single org.
 
 .PARAMETER Credential
 Credential for the CRM connection. Without it, the PSServiceAccount
@@ -76,19 +76,19 @@ lib\Common.ps1).
 Path to the settings file. Defaults to Settings.psd1 next to this script.
 
 .PARAMETER SkipNonIsolatedAssemblies
-Do not update the ticket's CRM non-isolated assemblies.
+Do not update the tickets' CRM non-isolated assemblies.
 
 .PARAMETER SkipSolutions
-Do not import the ticket's CRM solutions.
+Do not import the tickets' CRM solutions.
 
 .PARAMETER SkipAssemblies
-Do not update the ticket's CRM (sandbox) assemblies.
+Do not update the tickets' CRM (sandbox) assemblies.
 
 .PARAMETER SkipSetupData
-Do not update the ticket's Setup entity records.
+Do not update the tickets' Setup entity records.
 
 .PARAMETER SkipPSScripts
-Do not copy the ticket's PS scripts.
+Do not copy the tickets' PS scripts.
 
 .PARAMETER ContinueOnError
 Keep going after an item fails. By default the run stops at the first failure.
@@ -96,23 +96,25 @@ Keep going after an item fails. By default the run stops at the first failure.
 .PARAMETER Force
 Skip the confirmation prompt for PROD.
 
-.EXAMPLE
-.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322 -WhatIf
+.PARAMETER TargetOrgName
+No longer supported: the org comes from the org folder. Passing it stops
+the run.
 
-Dry run: checks the ticket, connects to CRM and lists what would change.
-
-.EXAMPLE
-.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322
-
-.EXAMPLE
-.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -DeployAll -WhatIf
-
-Dry run of every Fidelis ticket for 2026-09-30.
+.PARAMETER SourceOrgName
+No longer supported: the org comes from the org folder. Passing it stops
+the run.
 
 .EXAMPLE
-.\Deploy-CrmChange.ps1 -Environment DEV -SourceOrgName Fidelis -TargetOrgName Centene -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322 -WhatIf
+.\Deploy-CrmChange.ps1 -Environment DEV -DeploymentDate 2026-09-30 -Release R1 -DeployAll -WhatIf
 
-Deploys the CC-3322 package, built for Fidelis, to the Centene org.
+Dry run: checks every ticket of every org in R1, connects to each org and
+lists what would change.
+
+.EXAMPLE
+.\Deploy-CrmChange.ps1 -Environment DEV -DeploymentDate 2026-09-30 -Release R1 -DeployAll
+
+.EXAMPLE
+.\Deploy-CrmChange.ps1 -Environment DEV -DeploymentDate 2026-09-30 -Release R2 -ChangeControlTicket CC-3554
 #>
 [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Ticket')]
 param(
@@ -121,15 +123,12 @@ param(
     [string]$Environment,
 
     [Parameter(Mandatory)]
-    [ValidatePattern('^[\w\-]+$')]
-    [string]$TargetOrgName,
-
-    [ValidatePattern('^[\w\-]+$')]
-    [string]$SourceOrgName,
-
-    [Parameter(Mandatory)]
     [ValidatePattern('^\d{4}-\d{2}-\d{2}$')]
     [string]$DeploymentDate,
+
+    [Parameter(Mandatory)]
+    [ValidatePattern('^[\w\-]+$')]
+    [string]$Release,
 
     [Parameter(Mandatory, ParameterSetName = 'Ticket')]
     [ValidatePattern('^[\w\-. ]+$')]
@@ -151,11 +150,21 @@ param(
     [switch]$SkipSetupData,
     [switch]$SkipPSScripts,
     [switch]$ContinueOnError,
-    [switch]$Force
+    [switch]$Force,
+
+    # Deprecated: the org comes from the org folder under the release.
+    [Parameter(DontShow)][string]$TargetOrgName,
+    [Parameter(DontShow)][string]$SourceOrgName
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+if ($PSBoundParameters.ContainsKey('TargetOrgName') -or $PSBoundParameters.ContainsKey('SourceOrgName')) {
+    throw ("-TargetOrgName and -SourceOrgName are no longer supported. The org now comes from the org folder: " +
+        "{CRMDeployments}\{DeploymentDate}\{Release}\{Org}\{N. Ticket}. Remove them and run again " +
+        "(-DeployAll deploys every org in the release).")
+}
 
 foreach ($lib in 'Common', 'Tickets', 'Deploy-Solutions', 'Deploy-Assemblies', 'Deploy-SetupData', 'Deploy-PSScripts') {
     . (Join-Path $PSScriptRoot "lib\$lib.ps1")
@@ -167,8 +176,9 @@ function Get-TicketPlan {
     Reads and checks everything one ticket would deploy (honouring the
     -Skip* switches); throws on the first problem in the ticket.
     #>
-    param([Parameter(Mandatory)][string]$TicketFolder)
+    param([Parameter(Mandatory)]$Ticket)
 
+    $folder = $Ticket.Path
     $plan = [pscustomobject]@{
         NonIsolatedAssemblies = @()
         Solutions             = @()
@@ -179,19 +189,19 @@ function Get-TicketPlan {
         TotalCount            = 0
     }
     if (-not $SkipNonIsolatedAssemblies) {
-        $plan.NonIsolatedAssemblies = @(Get-AssemblyPlan -Folder (Join-Path $TicketFolder $folders.NonIsolatedAssemblies))
+        $plan.NonIsolatedAssemblies = @(Get-AssemblyPlan -Folder (Join-Path $folder $folders.NonIsolatedAssemblies))
     }
     if (-not $SkipSolutions) {
-        $plan.Solutions = @(Get-SolutionPlan -Folder (Join-Path $TicketFolder $folders.Solutions) -SolutionSettings $settings.Solutions)
+        $plan.Solutions = @(Get-SolutionPlan -Folder (Join-Path $folder $folders.Solutions) -SolutionSettings $settings.Solutions)
     }
     if (-not $SkipAssemblies) {
-        $plan.Assemblies = @(Get-AssemblyPlan -Folder (Join-Path $TicketFolder $folders.Assemblies))
+        $plan.Assemblies = @(Get-AssemblyPlan -Folder (Join-Path $folder $folders.Assemblies))
     }
     if (-not $SkipSetupData) {
-        $plan.SetupRows = @(Get-SetupDataPlan -Folder (Join-Path $TicketFolder $folders.SetupData) -SetupSettings $settings.SetupData)
+        $plan.SetupRows = @(Get-SetupDataPlan -Folder (Join-Path $folder $folders.SetupData) -SetupSettings $settings.SetupData)
     }
     if (-not $SkipPSScripts) {
-        $plan.Scripts = @(Get-PSScriptPlan -Folder (Join-Path $TicketFolder $folders.PSScripts) -TargetRoot $target.PSTargetLocation -SourceOrgName $SourceOrgName -TargetOrgName $TargetOrgName)
+        $plan.Scripts = @(Get-PSScriptPlan -Folder (Join-Path $folder $folders.PSScripts) -TargetRoot $orgTargets[$Ticket.Org].PSTargetLocation -OrgName $Ticket.Org)
     }
 
     $nonIsolatedNames = @($plan.NonIsolatedAssemblies | ForEach-Object { $_.Name })
@@ -239,21 +249,21 @@ if (-not (Test-Path -LiteralPath $SettingsPath -PathType Leaf)) {
     throw "Settings file not found: $SettingsPath"
 }
 $settings = Import-PowerShellDataFile -LiteralPath $SettingsPath
-if (-not $SourceOrgName) { $SourceOrgName = $TargetOrgName }
-$target = Resolve-EnvironmentSettings -Settings $settings -Environment $Environment -OrgName $TargetOrgName -Cluster $Cluster
 $folders = $settings.FolderNames
 
-$orgFolder = Join-Path (Join-Path $settings.CRMDeployments $DeploymentDate) $SourceOrgName
-if (-not (Test-Path -LiteralPath $orgFolder -PathType Container)) {
-    throw "Org folder not found: $orgFolder"
+$releaseFolder = Join-Path (Join-Path $settings.CRMDeployments $DeploymentDate) $Release
+if (-not (Test-Path -LiteralPath $releaseFolder -PathType Container)) {
+    throw "Release folder not found: $releaseFolder"
 }
-$tickets = @(Get-TicketFolders -OrgFolder $orgFolder -ExcludeNames @($folders.Logs) -Ticket $ChangeControlTicket)
+$tickets = @(Get-ReleaseTickets -ReleaseFolder $releaseFolder -ExcludeNames @($folders.Logs) -Ticket $ChangeControlTicket)
+$orgs = @($tickets | ForEach-Object { $_.Org } | Select-Object -Unique)
 
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$runName = "${Environment}_${TargetOrgName}_$stamp"
+$runName = "${Environment}_${Release}_$stamp"
 if ($WhatIfPreference) { $runName += '_WhatIf' }
-# A single ticket logs into its own folder; a -DeployAll run into the org folder.
-$logRoot = if ($DeployAll) { $orgFolder } else { $tickets[0].Path }
+# A single ticket logs into its own folder; a run of several tickets into the
+# release folder.
+$logRoot = if ($tickets.Count -gt 1) { $releaseFolder } else { $tickets[0].Path }
 $logFolder = Join-Path $logRoot $folders.Logs
 $logFile = Join-Path $logFolder "$runName.log"
 
@@ -263,28 +273,43 @@ Start-Transcript -LiteralPath $logFile -WhatIf:$false | Out-Null
 $exitCode = 0
 try {
     Write-Step 'Deployment'
-    Write-Info "Date:        $DeploymentDate"
-    Write-Info "Source:      $orgFolder"
-    Write-Info "Tickets:     $(($tickets | ForEach-Object { $_.Name }) -join ', ')"
-    Write-Info "Environment: $Environment$(if ($target.Cluster) { " (cluster $($target.Cluster))" })"
-    Write-Info "CRM org:     $($target.OrgUrl)"
-    if ($SourceOrgName -ne $TargetOrgName) { Write-Info "Package org: $SourceOrgName (deploying to $TargetOrgName)" }
-    Write-Info "PS scripts:  $($target.PSTargetLocation)"
+    Write-Info "Release:     $DeploymentDate $Release"
+    Write-Info "Source:      $releaseFolder"
+    Write-Info "Tickets:     $(($tickets | ForEach-Object { $_.Label }) -join ', ')"
+    Write-Info "Environment: $Environment"
     Write-Info "Run by:      $([Environment]::UserDomainName)\$([Environment]::UserName) on $([Environment]::MachineName)"
     if ($WhatIfPreference) { Write-Info 'Mode:        WhatIf (nothing will be changed)' }
 
-    # --- Check every ticket before changing anything --------------------------
+    # --- Check everything before changing anything ----------------------------
 
     Write-Step 'Pre-deployment checks'
+    if ($Cluster -and $orgs.Count -gt 1) {
+        throw "-Cluster can only be used when deploying to one org; this run covers $($orgs -join ', '). Add the orgs to OrgClusters in Settings.psd1 instead."
+    }
+
+    # Each org folder is a CRM org: resolve its URL and scripts location.
+    $orgTargets = @{}
     $problems = @()
+    foreach ($org in $orgs) {
+        try {
+            $orgTargets[$org] = Resolve-EnvironmentSettings -Settings $settings -Environment $Environment -OrgName $org -Cluster $Cluster
+            Write-Info "${org}: $($orgTargets[$org].OrgUrl)$(if ($orgTargets[$org].Cluster) { " (cluster $($orgTargets[$org].Cluster))" })"
+        } catch {
+            $problems += "${org}: $($_.Exception.Message)"
+        }
+    }
+    if ($problems) {
+        throw "Pre-deployment checks failed; nothing was deployed.`n" + ($problems -join "`n")
+    }
+
     foreach ($ticket in $tickets) {
         try {
-            $plan = Get-TicketPlan -TicketFolder $ticket.Path
+            $plan = Get-TicketPlan -Ticket $ticket
             $ticket | Add-Member -NotePropertyName Plan -NotePropertyValue $plan
             Write-Info ("{0}: {1} non-isolated assembly(ies), {2} solution(s), {3} sandbox assembly(ies), {4} setup row(s), {5} PS script(s)" -f `
-                $ticket.Name, $plan.NonIsolatedAssemblies.Count, $plan.Solutions.Count, $plan.Assemblies.Count, $plan.SetupRows.Count, $plan.Scripts.Count)
+                $ticket.Label, $plan.NonIsolatedAssemblies.Count, $plan.Solutions.Count, $plan.Assemblies.Count, $plan.SetupRows.Count, $plan.Scripts.Count)
         } catch {
-            $problems += "$($ticket.Name): $($_.Exception.Message)"
+            $problems += "$($ticket.Label): $($_.Exception.Message)"
         }
     }
     if ($problems) {
@@ -294,31 +319,33 @@ try {
         Write-DuplicateComponentWarnings -Tickets $tickets
     }
 
-    $totalCount = ($tickets | ForEach-Object { $_.Plan.TotalCount } | Measure-Object -Sum).Sum
-    $crmItemCount = ($tickets | ForEach-Object { $_.Plan.CrmItemCount } | Measure-Object -Sum).Sum
-    $scriptCount = ($tickets | ForEach-Object { $_.Plan.Scripts.Count } | Measure-Object -Sum).Sum
-    if ($totalCount -eq 0) {
+    if (($tickets | ForEach-Object { $_.Plan.TotalCount } | Measure-Object -Sum).Sum -eq 0) {
         Write-Warn 'Nothing to deploy.'
         return
     }
 
-    if ($scriptCount -gt 0) {
-        if (-not $target.PSTargetLocation -or $target.PSTargetLocation -eq 'TODO') {
-            throw "PSTargetLocation for $Environment is not set in Settings.psd1."
+    # Check each org's PS scripts target, and connect to each org that has
+    # CRM components, before deploying anything.
+    $connections = @{}
+    foreach ($org in $orgs) {
+        $orgTickets = @($tickets | Where-Object { $_.Org -eq $org })
+        $orgTarget = $orgTargets[$org]
+        if (($orgTickets | ForEach-Object { $_.Plan.Scripts.Count } | Measure-Object -Sum).Sum -gt 0) {
+            if (-not $orgTarget.PSTargetLocation -or $orgTarget.PSTargetLocation -eq 'TODO') {
+                throw "PSTargetLocation for $Environment is not set in Settings.psd1."
+            }
+            if (-not (Test-Path -LiteralPath $orgTarget.PSTargetLocation -PathType Container)) {
+                throw "PS scripts target for $org is not reachable: $($orgTarget.PSTargetLocation)"
+            }
         }
-        if (-not (Test-Path -LiteralPath $target.PSTargetLocation -PathType Container)) {
-            throw "PS scripts target is not reachable: $($target.PSTargetLocation)"
+        if (($orgTickets | ForEach-Object { $_.Plan.CrmItemCount } | Measure-Object -Sum).Sum -gt 0) {
+            $connections[$org] = Connect-CrmTarget -Target $orgTarget -OrgName $org -Credential $Credential
         }
-    }
-
-    $conn = $null
-    if ($crmItemCount -gt 0) {
-        $conn = Connect-CrmTarget -Target $target -OrgName $TargetOrgName -Credential $Credential
     }
     Write-Info 'Checks passed.'
 
     if ($Environment -eq 'PROD' -and -not $WhatIfPreference -and -not $Force) {
-        $question = "Deploy $(($tickets | ForEach-Object { $_.Name }) -join ', ') to PROD org $TargetOrgName ($($target.OrgUrl))?"
+        $question = "Deploy to PROD: $(($tickets | ForEach-Object { $_.Label }) -join ', ')?"
         if (-not $PSCmdlet.ShouldContinue($question, 'PROD deployment')) {
             Write-Warn 'Cancelled by user.'
             return
@@ -328,19 +355,20 @@ try {
     # --- Deploy, one ticket at a time ------------------------------------------
 
     foreach ($ticket in $tickets) {
-        $script:CurrentTicket = $ticket.Name
+        $script:CurrentTicket = $ticket.Label
         if ((Test-HasFailures) -and -not $ContinueOnError) {
-            Add-DeploymentResult -Stage 'Ticket' -Item $ticket.Name -Status Skipped -Detail 'Not deployed: an earlier ticket failed'
+            Add-DeploymentResult -Stage 'Ticket' -Item $ticket.Label -Status Skipped -Detail 'Not deployed: an earlier ticket failed'
             continue
         }
         if ($tickets.Count -gt 1) {
             Write-Host ''
-            Write-Host "##### Ticket $($ticket.Name) #####" -ForegroundColor Magenta
+            Write-Host "##### Ticket $($ticket.Label) -> $($orgTargets[$ticket.Org].OrgUrl) #####" -ForegroundColor Magenta
         }
         if ($ticket.Plan.TotalCount -eq 0) {
             Write-Info 'Nothing to deploy.'
             continue
         }
+        $conn = if ($connections.ContainsKey($ticket.Org)) { $connections[$ticket.Org] } else { $null }
         Invoke-TicketDeployment -Ticket $ticket -Conn $conn
     }
 } catch {
@@ -354,19 +382,19 @@ try {
         Write-Step 'Summary'
         $results | Format-Table $columns -AutoSize -Wrap | Out-String -Width 200 | Write-Host
     }
-    # In a -DeployAll run, leave each ticket its own part of the summary.
-    if ($DeployAll) {
+    # In a run of several tickets, leave each ticket its own part of the summary.
+    if ($tickets.Count -gt 1) {
         foreach ($ticket in $tickets) {
-            $ticketResults = @($results | Where-Object { $_.Ticket -eq $ticket.Name })
+            $ticketResults = @($results | Where-Object { $_.Ticket -eq $ticket.Label })
             if ($ticketResults.Count -eq 0) { continue }
             try {
                 $ticketLogFolder = Join-Path $ticket.Path $folders.Logs
                 New-Item -ItemType Directory -Path $ticketLogFolder -Force -WhatIf:$false | Out-Null
-                $text = "Deployed with -DeployAll ($Environment, $TargetOrgName). Full log: $logFile`r`n"
+                $text = "Deployed together with other tickets ($Environment, $DeploymentDate $Release). Full log: $logFile`r`n"
                 $text += $ticketResults | Format-Table Stage, Status, Item, Detail -AutoSize -Wrap | Out-String -Width 200
                 Set-Content -LiteralPath (Join-Path $ticketLogFolder "$runName.log") -Value $text -WhatIf:$false
             } catch {
-                Write-Warn "Could not write the summary for $($ticket.Name): $($_.Exception.Message)"
+                Write-Warn "Could not write the summary for $($ticket.Label): $($_.Exception.Message)"
             }
         }
     }

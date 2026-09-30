@@ -6,13 +6,14 @@
 # arrays) and never runs code. Do not put credentials in here.
 #
 @{
-    # Root of the deployment share. The script expects, per org and ticket
-    # (ticket folders numbered in deployment order, e.g. "1. CC-3554"):
-    #   {CRMDeployments}\{DeploymentDate}\{Org}\{N. Ticket}\CRM Non-Isolated Assemblies
-    #   {CRMDeployments}\{DeploymentDate}\{Org}\{N. Ticket}\CRM Solutions
-    #   {CRMDeployments}\{DeploymentDate}\{Org}\{N. Ticket}\CRM Assemblies
-    #   {CRMDeployments}\{DeploymentDate}\{Org}\{N. Ticket}\Setup Data
-    #   {CRMDeployments}\{DeploymentDate}\{Org}\{N. Ticket}\PS Scripts
+    # Root of the deployment share. The script expects, per release, org and
+    # ticket (the org folder is the CRM org name; ticket folders are numbered
+    # in deployment order, e.g. "1. CC-3554"):
+    #   {CRMDeployments}\{DeploymentDate}\{Release}\{Org}\{N. Ticket}\CRM Non-Isolated Assemblies
+    #   {CRMDeployments}\{DeploymentDate}\{Release}\{Org}\{N. Ticket}\CRM Solutions
+    #   {CRMDeployments}\{DeploymentDate}\{Release}\{Org}\{N. Ticket}\CRM Assemblies
+    #   {CRMDeployments}\{DeploymentDate}\{Release}\{Org}\{N. Ticket}\Setup Data
+    #   {CRMDeployments}\{DeploymentDate}\{Release}\{Org}\{N. Ticket}\PS Scripts
     CRMDeployments = '\\turningpoint-healthcare.com\it\Application Development\CRM Deployments'
 
     # Sub-folder names inside a ticket folder. Logs and Backups are created by
@@ -55,8 +56,8 @@
 
     # One entry per target environment (the -Environment parameter).
     #
-    # CrmServerUrl is the server part of the CRM URL; the org name (the client,
-    # the -OrgName parameter) is appended to it, e.g.
+    # CrmServerUrl is the server part of the CRM URL; the org name (the org
+    # folder's name) is appended to it, e.g.
     #   http://tpsdevdynfe101.turningpoint-healthcare.com/Fidelis
     #
     # A "{Cluster}" token in CrmServerUrl or PSTargetLocation is replaced with

@@ -1,15 +1,15 @@
 # CRM Deployment Assistant
 
 Deploys change-control tickets' CRM components to DEV, UAT or PROD with a
-single PowerShell command: one ticket, or every ticket of an org for a date.
+single PowerShell command: one ticket, or every ticket of a release.
 
 ```powershell
-# One ticket
-.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3554 -WhatIf
-.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3554
+# Every ticket of every org in release R1 of 2026-09-30
+.\Deploy-CrmChange.ps1 -Environment DEV -DeploymentDate 2026-09-30 -Release R1 -DeployAll -WhatIf
+.\Deploy-CrmChange.ps1 -Environment DEV -DeploymentDate 2026-09-30 -Release R1 -DeployAll
 
-# Every Fidelis ticket for the date, in number order
-.\Deploy-CrmChange.ps1 -Environment DEV -TargetOrgName Fidelis -DeploymentDate 2026-09-30 -DeployAll -WhatIf
+# One ticket
+.\Deploy-CrmChange.ps1 -Environment DEV -DeploymentDate 2026-09-30 -Release R2 -ChangeControlTicket CC-3554
 ```
 
 Always run with `-WhatIf` first: it checks the tickets, connects to CRM and
@@ -18,18 +18,31 @@ lists what would change, without changing anything.
 ## Folder layout
 
 ```
-{CRMDeployments}\{DeploymentDate}\{Org}\
-    1. CC-3554\     ticket folders, numbered in deployment order
-    2. CC-3560\
-    Logs\           created by -DeployAll runs: one log per run
+{CRMDeployments}\{DeploymentDate}\
+    R1\                  first release of the day
+        BCBSM\           org folder = CRM organization name, exactly
+            1. CC-3786\  ticket folders, numbered in deployment order
+            2. CC-3790\
+        Fidelis\
+            1. CC-3554\
+        Logs\            created by runs of several tickets: one log per run
+    R2\                  second release of the day
+        Fidelis\
+            1. CC-3600\
 ```
 
-`{Org}` is the org the tickets were built for (`-SourceOrgName`, which
-defaults to `-TargetOrgName`). Tickets are deployed in number order, so
-`10.` comes after `9.` without zero-padding. `-ChangeControlTicket CC-3554`
-finds `1. CC-3554`. With `-DeployAll`, every ticket folder must be numbered,
-and no number or ticket may appear twice; otherwise the run stops before
-changing anything.
+The **org folder decides where tickets deploy**: tickets under `Fidelis\`
+go to the Fidelis CRM org (in PROD, on Fidelis's cluster from
+`OrgClusters`) and their PS scripts to that environment's
+`PSTargetLocation`. So the folder name must match the CRM org name exactly.
+
+- `-DeployAll` deploys every org in the release (orgs alphabetically), each
+  org's tickets in number order, one ticket at a time. `10.` comes after
+  `9.` without zero-padding. Every ticket folder must be numbered, and no
+  number or ticket may appear twice in an org; otherwise the run stops
+  before changing anything.
+- `-ChangeControlTicket CC-3554` finds `1. CC-3554` in whichever org folder
+  has it. If several orgs have that ticket, it is deployed to each of them.
 
 Inside each ticket folder:
 
@@ -51,12 +64,13 @@ it uses; missing or empty ones are skipped.
 
 1. **Checks everything first, for every ticket in the run.** Ticket
    folders, solution order, DLLs (must be strong-name signed .NET
-   assemblies), Setup CSVs, PS scripts target reachable, CRM connection.
-   Nothing is changed if any check fails. With `-DeployAll`, it also warns
-   about components that more than one ticket deploys (the later ticket
-   wins).
+   assemblies), Setup CSVs, each org's CRM URL (in PROD, its cluster),
+   PS scripts target reachable, a CRM connection to each org. Nothing is
+   changed if any check fails. It also warns about components that more
+   than one ticket of the same org deploys (the later ticket wins), and
+   about PS scripts under another org's `Orgs\` folder.
 
-Then, one ticket at a time, in number order:
+Then, one ticket at a time, org by org, in number order:
 
 2. **CRM Non-Isolated Assemblies.** Updates assemblies registered with
    isolation mode **None**, the same way as step 4. They go first, before
@@ -85,31 +99,30 @@ Then, one ticket at a time, in number order:
    schema names are under `SetupData` in `Settings.psd1`.
 6. **PS Scripts.** Copies each file to `{PSTargetLocation}\<relative path>`,
    e.g. `PS Scripts\Orgs\Fidelis\Foo.ps1` goes to
-   `\\tps-dev-xrmwf3\c$\inetpub\poshweb\scripts-root\Orgs\Fidelis\Foo.ps1`.
+   `\\tps-dev-xrmwf3\c$\inetpub\wwwroot\poshweb\scripts-root\Orgs\Fidelis\Foo.ps1`.
    Identical files are skipped; a file about to be overwritten is first
    copied to `{Ticket}\Backups\<run>\PS Scripts\...`.
 
 The run stops at the first failure unless `-ContinueOnError` is passed; if
-some solutions were already imported, they are still published. With
-`-DeployAll`, the tickets after a failed one are not deployed (they show as
-Skipped). A summary table is printed at the end and the script exits with
-code 1 on any failure.
+some solutions were already imported, they are still published. The
+tickets after a failed one are not deployed (they show as Skipped). A
+summary table is printed at the end and the script exits with code 1 on
+any failure.
 
-A single-ticket run logs to `{Ticket}\Logs`. A `-DeployAll` run logs to
-`{Org}\Logs`, and each ticket's part of the summary is also written to
-that ticket's `Logs` folder.
+A run of one ticket logs to `{Ticket}\Logs`. A run of several tickets logs
+to `{Release}\Logs`, and each ticket's part of the summary is also written
+to that ticket's `Logs` folder.
 
 ## Parameters
 
 | Parameter | Description |
 |---|---|
 | `-Environment` | `DEV`, `UAT` or `PROD` |
-| `-TargetOrgName` | CRM org to deploy to = client name, e.g. `Fidelis` |
-| `-SourceOrgName` | Org the package was built for; defaults to `-TargetOrgName`. See below |
 | `-DeploymentDate` | Date folder, `yyyy-MM-dd` |
-| `-ChangeControlTicket` | One ticket, e.g. `CC-3554` (finds `1. CC-3554`) |
-| `-DeployAll` | Every ticket in the org folder, in number order. Use instead of `-ChangeControlTicket` |
-| `-Cluster` | PROD only: `um1`, `um2` or `um3`; overrides `OrgClusters` in settings |
+| `-Release` | Release folder under the date, e.g. `R1`, `R2` |
+| `-ChangeControlTicket` | One ticket, e.g. `CC-3554` (finds `1. CC-3554` in any org folder) |
+| `-DeployAll` | Every ticket of every org in the release. Use instead of `-ChangeControlTicket` |
+| `-Cluster` | PROD only: `um1`, `um2` or `um3`; overrides `OrgClusters` in settings. Only when the run covers one org |
 | `-Credential` | CRM credential; default is the `PSServiceAccount` from `$SecuritySettings` |
 | `-WhatIf` | Dry run |
 | `-SkipNonIsolatedAssemblies`, `-SkipSolutions`, `-SkipAssemblies`, `-SkipSetupData`, `-SkipPSScripts` | Skip a stage (`-SkipAssemblies` is the Sandbox one) |
@@ -117,22 +130,8 @@ that ticket's `Logs` folder.
 | `-Force` | Skip the PROD confirmation prompt |
 | `-SettingsPath` | Alternative settings file |
 
-## Deploying a package to a different org
-
-To deploy a ticket built for one org to another, pass both org names:
-
-```powershell
-.\Deploy-CrmChange.ps1 -Environment DEV -SourceOrgName Fidelis -TargetOrgName Centene -DeploymentDate 2026-09-30 -ChangeControlTicket CC-3322 -WhatIf
-```
-
-- **PS Scripts:** a folder named after the source org is renamed to the
-  target org, so `PS Scripts\Orgs\Fidelis\Foo.ps1` goes to
-  `{PSTargetLocation}\Orgs\Centene\Foo.ps1`. File names are never changed.
-  A script under `Orgs\` of any other org stops the run, since it can't
-  be redirected.
-- **Setup Data:** record IDs differ between orgs, so rows fall back to
-  matching on Name.
-- **Solutions and assemblies** are deployed as they are.
+`-TargetOrgName` and `-SourceOrgName` are no longer supported: the org
+comes from the org folder. Passing either one stops the run with an error.
 
 ## Settings (`Settings.psd1`)
 
@@ -141,9 +140,9 @@ and per environment the CRM server URL and `PSTargetLocation`. PROD is spread
 over three clusters (`um1`, `um2`, `um3`), so its URL uses a `{Cluster}` token
 and `OrgClusters` maps each client to its cluster.
 
-When a new client is onboarded in PROD, add it to `OrgClusters` (or pass
-`-Cluster` on the run); a PROD run for an unknown client stops before changing
-anything.
+When a new client is onboarded in PROD, add it to `OrgClusters`; a PROD run
+with an org folder that isn't listed there (e.g. a misspelled folder name)
+stops before changing anything.
 
 ## Requirements
 
