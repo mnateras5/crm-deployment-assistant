@@ -96,6 +96,7 @@
                 Fidelis    = 'um2'
                 HAP        = 'um1'
                 HorizonNJ  = 'um2'
+                Molina     = 'um3'
                 Priority   = 'um1'
                 WellCare   = 'um2'
             }
