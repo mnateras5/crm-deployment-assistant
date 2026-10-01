@@ -85,6 +85,7 @@ function Invoke-SolutionDeployment {
             $imported++
             $elapsed = [int]((Get-Date) - $started).TotalSeconds
             Add-DeploymentResult -Stage $stage -Item $zip.Name -Status Deployed -Detail "Imported in ${elapsed}s"
+            Add-ToArchive -Path $zip.FullName
         } catch {
             Add-DeploymentResult -Stage $stage -Item $zip.Name -Status Failed -Detail $_.Exception.Message
             if (-not $ContinueOnError) { break }

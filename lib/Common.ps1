@@ -56,7 +56,64 @@ function Get-DeploymentResults {
 }
 
 function Test-HasFailures {
-    return @($script:DeploymentResults | Where-Object { $_.Status -eq 'Failed' }).Count -gt 0
+    # With -Ticket, only that ticket's results count.
+    param([string]$Ticket)
+    return @($script:DeploymentResults | Where-Object {
+        $_.Status -eq 'Failed' -and (-not $Ticket -or $_.Ticket -eq $Ticket)
+    }).Count -gt 0
+}
+
+# --- Archive ------------------------------------------------------------------
+#
+# After an item deploys, a copy goes to the ticket's archive for the
+# environment, mirroring its path in the ticket folder:
+#   {Org}\{N. Ticket}\CRM Solutions\Core.zip
+#   -> {Org}\Archive\{Env}\{N. Ticket}\CRM Solutions\Core.zip
+# A later run in that environment skips items whose archived copy is
+# identical, so a re-run after a failure only deploys what is left (and a
+# file that was changed since is deployed again). The originals stay in
+# place for the other environments.
+
+# Set per ticket by Deploy-CrmChange.ps1: @{ TicketPath; ArchivePath }.
+$script:ArchiveContext = $null
+
+function Get-ArchivedCopyPath {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not $script:ArchiveContext) { return $null }
+    $ticketPath = $script:ArchiveContext.TicketPath.TrimEnd('\', '/')
+    if (-not $Path.StartsWith($ticketPath, [StringComparison]::OrdinalIgnoreCase)) { return $null }
+    $relative = $Path.Substring($ticketPath.Length).TrimStart('\', '/')
+    return Join-Path $script:ArchiveContext.ArchivePath $relative
+}
+
+function Test-Archived {
+    <#
+    .SYNOPSIS
+    True when the file was already deployed to this environment: its
+    archived copy exists and is identical.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    $copy = Get-ArchivedCopyPath -Path $Path
+    if (-not $copy -or -not (Test-Path -LiteralPath $copy -PathType Leaf)) { return $false }
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash
+}
+
+function Add-ToArchive {
+    <#
+    .SYNOPSIS
+    Copies a deployed file to the environment's archive. Does nothing under
+    -WhatIf; a failure to archive is a warning, not a failed deployment.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    if ($WhatIfPreference) { return }
+    $copy = Get-ArchivedCopyPath -Path $Path
+    if (-not $copy) { return }
+    try {
+        New-Item -ItemType Directory -Path (Split-Path $copy -Parent) -Force -WhatIf:$false | Out-Null
+        Copy-Item -LiteralPath $Path -Destination $copy -Force -ErrorAction Stop -WhatIf:$false
+    } catch {
+        Write-Warn "Deployed, but could not archive '$Path': $($_.Exception.Message)"
+    }
 }
 
 function Get-StageFiles {
@@ -86,7 +143,9 @@ function Connect-CrmTarget {
     param(
         [Parameter(Mandatory)]$Target,
         [Parameter(Mandatory)][string]$OrgName,
-        [System.Management.Automation.PSCredential]$Credential
+        [System.Management.Automation.PSCredential]$Credential,
+        # Timeout for connecting and for each CRM request (the SDK default is 2 minutes).
+        [int]$TimeoutSeconds = 180
     )
     if ($PSVersionTable.PSEdition -ne 'Desktop') {
         throw 'Microsoft.Xrm.Data.PowerShell needs Windows PowerShell 5.1 (powershell.exe), not PowerShell 7 (pwsh.exe).'
@@ -96,7 +155,11 @@ function Connect-CrmTarget {
     }
     Import-Module Microsoft.Xrm.Data.PowerShell -ErrorAction Stop
 
-    Write-Info "Connecting to $($Target.OrgUrl) ..."
+    # Applies to every CrmServiceClient created from here on, including the
+    # connection below.
+    [Microsoft.Xrm.Tooling.Connector.CrmServiceClient]::MaxConnectionTimeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
+
+    Write-Info "Connecting to $($Target.OrgUrl) (timeout ${TimeoutSeconds}s) ..."
     if ($Credential) {
         $conn = Connect-CrmOnPremDiscovery -ServerUrl $Target.ServerUrl -OrganizationName $OrgName -Credential $Credential -ErrorAction Stop
     } else {
@@ -107,6 +170,14 @@ function Connect-CrmTarget {
     if (-not $conn -or -not $conn.IsReady) {
         $reason = if ($conn) { $conn.LastCrmError } else { 'no connection returned' }
         throw "Could not connect to $($Target.OrgUrl): $reason"
+    }
+    # Also set it on this connection, for module versions that read it there.
+    if (Get-Command Set-CrmConnectionTimeout -ErrorAction SilentlyContinue) {
+        try {
+            Set-CrmConnectionTimeout -conn $conn -TimeoutInSeconds $TimeoutSeconds | Out-Null
+        } catch {
+            Write-Warn "Could not set the connection timeout: $($_.Exception.Message)"
+        }
     }
     Write-Info "Connected to $($conn.ConnectedOrgFriendlyName) ($($conn.ConnectedOrgVersion))."
     return $conn

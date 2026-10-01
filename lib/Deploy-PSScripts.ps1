@@ -61,6 +61,7 @@ function Invoke-PSScriptDeployment {
                 $targetHash = (Get-FileHash -LiteralPath $script.Target -Algorithm SHA256).Hash
                 if ($sourceHash -eq $targetHash) {
                     Add-DeploymentResult -Stage $stage -Item $item -Status Unchanged -Detail 'Target is identical'
+                    Add-ToArchive -Path $script.Source.FullName
                     continue
                 }
             }
@@ -81,6 +82,7 @@ function Invoke-PSScriptDeployment {
 
             $detail = if ($targetExists) { 'Overwritten (previous version backed up)' } else { 'New file' }
             Add-DeploymentResult -Stage $stage -Item $item -Status Deployed -Detail $detail
+            Add-ToArchive -Path $script.Source.FullName
         } catch {
             Add-DeploymentResult -Stage $stage -Item $item -Status Failed -Detail $_.Exception.Message
             if (-not $ContinueOnError) { break }

@@ -1,9 +1,12 @@
-# Update Setup entity records from the ticket's "Setup Data" CSV files.
+# Create or update Setup entity records from the ticket's "Setup Data" CSV
+# files.
 #
 # Each CSV has the columns ID, Name, Value (an Advanced Find export of the
 # Setup entity, saved as CSV). A row is matched to its record by ID first
 # and, when no record has that ID (IDs usually differ between environments),
-# by Name. Only the Value field is updated; records are never created.
+# by Name, and the record's Value is updated. When neither matches, the
+# record is created with the row's Name and Value, and with the row's ID
+# when it has one, so the record keeps the same ID in every environment.
 # The Setup entity's schema names are in Settings.psd1 (SetupData).
 
 function Get-SetupDataPlan {
@@ -11,7 +14,7 @@ function Get-SetupDataPlan {
     .SYNOPSIS
     Reads every .csv in the folder and returns one entry per row, or throws
     if a file lacks the ID/Name/Value columns, a row has no key, an ID is
-    not a GUID, a value is too long, or the same key appears twice.
+    not a GUID, a name or value is too long, or the same key appears twice.
     #>
     param(
         [Parameter(Mandatory)][string]$Folder,
@@ -51,6 +54,9 @@ function Get-SetupDataPlan {
                 $problems += "${where}: ID '$idText' is not a GUID"
                 continue
             }
+            if ($name.Length -gt $SetupSettings.NameMaxLength) {
+                $problems += "${where}: Name is $($name.Length) characters; $($SetupSettings.NameAttribute) holds at most $($SetupSettings.NameMaxLength)"
+            }
             if ($value.Length -gt $SetupSettings.ValueMaxLength) {
                 $problems += "${where}: Value is $($value.Length) characters; $($SetupSettings.ValueAttribute) holds at most $($SetupSettings.ValueMaxLength)"
             }
@@ -63,6 +69,7 @@ function Get-SetupDataPlan {
                 $seenNames[$name] = $where
             }
             $plan += [pscustomobject]@{
+                File   = $file.FullName
                 Source = $where
                 Id     = if ($idText) { $id } else { $null }
                 Name   = $name
@@ -88,8 +95,9 @@ function Get-RecordAttribute {
 function Find-SetupRecord {
     <#
     .SYNOPSIS
-    Returns the Setup record a row refers to, or throws when there is none,
-    more than one, or the ID and Name point at different records.
+    Returns the Setup record a row refers to, $null when there is none, or
+    throws when there is more than one or the ID and Name point at
+    different records.
     #>
     param(
         [Parameter(Mandatory)]$Conn,
@@ -111,17 +119,13 @@ function Find-SetupRecord {
             }
             return $record
         }
-        if (-not $Row.Name) {
-            throw "No $entity record has ID $($Row.Id), and the row has no Name to match on."
-        }
+        if (-not $Row.Name) { return $null }
     }
 
     $byName = @((Get-CrmRecords -conn $Conn -EntityLogicalName $entity `
         -FilterAttribute $SetupSettings.NameAttribute -FilterOperator eq -FilterValue $Row.Name `
         -Fields $fields -ErrorAction Stop).CrmRecords)
-    if ($byName.Count -eq 0) {
-        throw "No $entity record is named '$($Row.Name)'. This stage only updates existing records."
-    }
+    if ($byName.Count -eq 0) { return $null }
     if ($byName.Count -gt 1) {
         throw "$($byName.Count) $entity records are named '$($Row.Name)'; add the ID to pick one."
     }
@@ -144,15 +148,39 @@ function Invoke-SetupDataDeployment {
         return
     }
 
+    # A CSV is archived once every one of its rows is done.
+    $pendingRows = @{}
+    foreach ($row in $Rows) { $pendingRows[$row.File] = 1 + [int]$pendingRows[$row.File] }
+
     foreach ($row in $Rows) {
         $item = if ($row.Name) { $row.Name } else { "$($row.Id)" }
         try {
             # Runs under -WhatIf too: the lookup is read-only.
             $record = Find-SetupRecord -Conn $Conn -Row $row -SetupSettings $SetupSettings
+            if (-not $record) {
+                if (-not $row.Name) {
+                    throw "No $($SetupSettings.EntityLogicalName) record has ID $($row.Id), and the row has no Name to create it with."
+                }
+                $newRecord = "'$($row.Name)' = '$($row.Value)'"
+                if (-not $PSCmdlet.ShouldProcess($newRecord, 'Create Setup record')) {
+                    Add-DeploymentResult -Stage $stage -Item $item -Status WhatIf -Detail "Would create with '$($row.Value)'"
+                    continue
+                }
+                $fields = @{
+                    $SetupSettings.NameAttribute  = $row.Name
+                    $SetupSettings.ValueAttribute = $row.Value
+                }
+                if ($row.Id) { $fields[$SetupSettings.IdAttribute] = $row.Id }
+                New-CrmRecord -conn $Conn -EntityLogicalName $SetupSettings.EntityLogicalName -Fields $fields -ErrorAction Stop | Out-Null
+                Add-DeploymentResult -Stage $stage -Item $item -Status Deployed -Detail "Created with '$($row.Value)'"
+                $pendingRows[$row.File]--
+                continue
+            }
             $current = "$(Get-RecordAttribute -Record $record -Attribute $SetupSettings.ValueAttribute)"
             # Case-insensitive so an Excel round trip (true -> TRUE) is not a change.
             if ([string]::Equals($current, $row.Value, [StringComparison]::OrdinalIgnoreCase)) {
                 Add-DeploymentResult -Stage $stage -Item $item -Status Unchanged -Detail "Already '$current'"
+                $pendingRows[$row.File]--
                 continue
             }
             $change = "'$current' -> '$($row.Value)'"
@@ -166,9 +194,14 @@ function Invoke-SetupDataDeployment {
                 $SetupSettings.ValueAttribute = $row.Value
             } -ErrorAction Stop
             Add-DeploymentResult -Stage $stage -Item $item -Status Deployed -Detail "Changed $change"
+            $pendingRows[$row.File]--
         } catch {
             Add-DeploymentResult -Stage $stage -Item $item -Status Failed -Detail "$($row.Source): $($_.Exception.Message)"
             if (-not $ContinueOnError) { break }
         }
+    }
+
+    foreach ($file in @($pendingRows.Keys)) {
+        if ($pendingRows[$file] -eq 0) { Add-ToArchive -Path $file }
     }
 }

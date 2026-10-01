@@ -12,10 +12,10 @@ deployment order:
 {Org} is the CRM organization the tickets deploy to, so the folder name
 must match the org name exactly.
 
--ChangeControlTicket deploys one ticket (found in whichever org folder has
-it); -DeployAll deploys every ticket of every org in the release: orgs in
-alphabetical order, each org's tickets in number order, one ticket at a
-time.
+-ChangeControlTicket deploys one ticket (to every org folder that has it,
+or only to -TargetOrgName); -DeployAll deploys every ticket of every org in
+the release: orgs in alphabetical order, each org's tickets in number
+order, one ticket at a time.
 
 Each ticket's components are deployed in this order:
     1. CRM Non-Isolated Assemblies - updates already-registered assemblies
@@ -24,8 +24,8 @@ Each ticket's components are deployed in this order:
                                      then publishes
     3. CRM Assemblies              - updates already-registered assemblies
                                      with isolation mode Sandbox
-    4. Setup Data                  - updates Value on existing Setup records
-                                     from the folder's CSV files
+    4. Setup Data                  - creates or updates Setup records from
+                                     the folder's CSV files
     5. PS Scripts                  - copies scripts to
                                      {PSTargetLocation}\<relative path>
 
@@ -33,8 +33,14 @@ A ticket does not need every folder; missing or empty ones are skipped.
 Everything, for every ticket, is checked before anything is changed: the
 ticket folders, each org's CRM URL and connection, the solution order,
 that the DLLs are signed .NET assemblies, the Setup CSVs and the PS
-scripts target. The run stops at the first failure, and later tickets are
-not deployed.
+scripts target. When an item fails, the rest of that ticket is not
+deployed, and the run carries on with the next ticket.
+
+Every item that deploys is copied to {Org}\Archive\{Environment}\{N. Ticket}.
+The next run in the same environment skips items whose archived copy is
+identical, so a re-run after a failure only deploys what is left; a file
+that was changed since is deployed again. -IgnoreArchive deploys
+everything.
 
 A run of one ticket logs to {Ticket}\Logs. A run of several tickets
 (-DeployAll, or a ticket found in several orgs) logs to {Release}\Logs and
@@ -56,7 +62,12 @@ The release folder under the date, e.g. R1 or R2.
 .PARAMETER ChangeControlTicket
 The ticket to deploy, e.g. CC-3554. Matches the folder "1. CC-3554" (or a
 folder named exactly CC-3554) in any org folder of the release; if several
-orgs have that ticket, it is deployed to each of them.
+orgs have that ticket, it is deployed to each of them, unless
+-TargetOrgName names one.
+
+.PARAMETER TargetOrgName
+With -ChangeControlTicket only: deploy the ticket to this org only (the
+org folder of that name), even if other orgs in the release have it.
 
 .PARAMETER DeployAll
 Deploy every ticket of every org in the release. Every ticket folder must
@@ -85,20 +96,21 @@ Do not import the tickets' CRM solutions.
 Do not update the tickets' CRM (sandbox) assemblies.
 
 .PARAMETER SkipSetupData
-Do not update the tickets' Setup entity records.
+Do not create or update the tickets' Setup entity records.
 
 .PARAMETER SkipPSScripts
 Do not copy the tickets' PS scripts.
 
 .PARAMETER ContinueOnError
-Keep going after an item fails. By default the run stops at the first failure.
+Keep going within a ticket after an item fails. By default the rest of
+that ticket is not deployed (the run still moves on to the next ticket).
+
+.PARAMETER IgnoreArchive
+Deploy every item, including those already deployed to this environment
+according to the archive.
 
 .PARAMETER Force
 Skip the confirmation prompt for PROD.
-
-.PARAMETER TargetOrgName
-No longer supported: the org comes from the org folder. Passing it stops
-the run.
 
 .PARAMETER SourceOrgName
 No longer supported: the org comes from the org folder. Passing it stops
@@ -115,6 +127,11 @@ lists what would change.
 
 .EXAMPLE
 .\Deploy-CrmChange.ps1 -Environment DEV -DeploymentDate 2026-09-30 -Release R2 -ChangeControlTicket CC-3554
+
+.EXAMPLE
+.\Deploy-CrmChange.ps1 -Environment DEV -DeploymentDate 2026-09-30 -Release R1 -ChangeControlTicket CC-3786 -TargetOrgName BCBSM
+
+Deploys CC-3786 to BCBSM only, even if other orgs in R1 have it too.
 #>
 [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Ticket')]
 param(
@@ -134,6 +151,10 @@ param(
     [ValidatePattern('^[\w\-. ]+$')]
     [string]$ChangeControlTicket,
 
+    [Parameter(ParameterSetName = 'Ticket')]
+    [ValidatePattern('^[\w\-]+$')]
+    [string]$TargetOrgName,
+
     [Parameter(Mandatory, ParameterSetName = 'All')]
     [switch]$DeployAll,
 
@@ -150,20 +171,20 @@ param(
     [switch]$SkipSetupData,
     [switch]$SkipPSScripts,
     [switch]$ContinueOnError,
+    [switch]$IgnoreArchive,
     [switch]$Force,
 
     # Deprecated: the org comes from the org folder under the release.
-    [Parameter(DontShow)][string]$TargetOrgName,
     [Parameter(DontShow)][string]$SourceOrgName
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-if ($PSBoundParameters.ContainsKey('TargetOrgName') -or $PSBoundParameters.ContainsKey('SourceOrgName')) {
-    throw ("-TargetOrgName and -SourceOrgName are no longer supported. The org now comes from the org folder: " +
-        "{CRMDeployments}\{DeploymentDate}\{Release}\{Org}\{N. Ticket}. Remove them and run again " +
-        "(-DeployAll deploys every org in the release).")
+if ($PSBoundParameters.ContainsKey('SourceOrgName')) {
+    throw ("-SourceOrgName is no longer supported. The org now comes from the org folder: " +
+        "{CRMDeployments}\{DeploymentDate}\{Release}\{Org}\{N. Ticket}. Remove it and run again " +
+        "(use -TargetOrgName with -ChangeControlTicket to deploy a ticket to one org only).")
 }
 
 foreach ($lib in 'Common', 'Tickets', 'Deploy-Solutions', 'Deploy-Assemblies', 'Deploy-SetupData', 'Deploy-PSScripts') {
@@ -204,6 +225,33 @@ function Get-TicketPlan {
         $plan.Scripts = @(Get-PSScriptPlan -Folder (Join-Path $folder $folders.PSScripts) -TargetRoot $orgTargets[$Ticket.Org].PSTargetLocation -OrgName $Ticket.Org)
     }
 
+    # Leave out what the archive says is already deployed to this environment.
+    $plan | Add-Member -NotePropertyName Archived -NotePropertyValue @()
+    if (-not $IgnoreArchive) {
+        $pending = @{ NonIsolatedAssemblies = @(); Solutions = @(); Assemblies = @(); SetupRows = @(); Scripts = @() }
+        foreach ($assembly in $plan.NonIsolatedAssemblies) {
+            if (Test-Archived -Path $assembly.File.FullName) { $plan.Archived += [pscustomobject]@{ Stage = 'Non-Isolated Assemblies'; Item = $assembly.File.Name } }
+            else { $pending.NonIsolatedAssemblies += $assembly }
+        }
+        foreach ($zip in $plan.Solutions) {
+            if (Test-Archived -Path $zip.FullName) { $plan.Archived += [pscustomobject]@{ Stage = 'Solutions'; Item = $zip.Name } }
+            else { $pending.Solutions += $zip }
+        }
+        foreach ($assembly in $plan.Assemblies) {
+            if (Test-Archived -Path $assembly.File.FullName) { $plan.Archived += [pscustomobject]@{ Stage = 'Sandbox Assemblies'; Item = $assembly.File.Name } }
+            else { $pending.Assemblies += $assembly }
+        }
+        foreach ($csv in @($plan.SetupRows | Group-Object File)) {
+            if (Test-Archived -Path $csv.Name) { $plan.Archived += [pscustomobject]@{ Stage = 'Setup Data'; Item = "$(Split-Path $csv.Name -Leaf) ($($csv.Count) row(s))" } }
+            else { $pending.SetupRows += $csv.Group }
+        }
+        foreach ($script in $plan.Scripts) {
+            if (Test-Archived -Path $script.Source.FullName) { $plan.Archived += [pscustomobject]@{ Stage = 'PS Scripts'; Item = $script.RelativePath } }
+            else { $pending.Scripts += $script }
+        }
+        foreach ($key in @($pending.Keys)) { $plan.$key = @($pending[$key]) }
+    }
+
     $nonIsolatedNames = @($plan.NonIsolatedAssemblies | ForEach-Object { $_.Name })
     $inBoth = @($plan.Assemblies | Where-Object { $nonIsolatedNames -contains $_.Name } | ForEach-Object { $_.File.Name })
     if ($inBoth.Count -gt 0) {
@@ -228,18 +276,37 @@ function Invoke-TicketDeployment {
     $plan = $Ticket.Plan
     $backupRoot = Join-Path (Join-Path (Join-Path $Ticket.Path $folders.Backups) $runName) $folders.PSScripts
 
+    if ($plan.Archived.Count -gt 0) {
+        Write-Step "Already deployed to $Environment ($($plan.Archived.Count))"
+        foreach ($archived in $plan.Archived) {
+            Add-DeploymentResult -Stage $archived.Stage -Item $archived.Item -Status Skipped -Detail "Already deployed to $Environment (archive)"
+        }
+    }
+
+    $label = $Ticket.Label
     Invoke-AssemblyDeployment -Conn $Conn -Assemblies $plan.NonIsolatedAssemblies -IsolationMode None -FolderName $folders.NonIsolatedAssemblies -ContinueOnError:$ContinueOnError
-    if (-not (Test-HasFailures) -or $ContinueOnError) {
+    if (-not (Test-HasFailures -Ticket $label) -or $ContinueOnError) {
         Invoke-SolutionDeployment -Conn $Conn -Solutions $plan.Solutions -SolutionSettings $settings.Solutions -ContinueOnError:$ContinueOnError
     }
-    if (-not (Test-HasFailures) -or $ContinueOnError) {
+    if (-not (Test-HasFailures -Ticket $label) -or $ContinueOnError) {
         Invoke-AssemblyDeployment -Conn $Conn -Assemblies $plan.Assemblies -IsolationMode Sandbox -FolderName $folders.Assemblies -ContinueOnError:$ContinueOnError
     }
-    if (-not (Test-HasFailures) -or $ContinueOnError) {
+    if (-not (Test-HasFailures -Ticket $label) -or $ContinueOnError) {
         Invoke-SetupDataDeployment -Conn $Conn -Rows $plan.SetupRows -SetupSettings $settings.SetupData -FolderName $folders.SetupData -ContinueOnError:$ContinueOnError
     }
-    if (-not (Test-HasFailures) -or $ContinueOnError) {
+    if (-not (Test-HasFailures -Ticket $label) -or $ContinueOnError) {
         Invoke-PSScriptDeployment -Scripts $plan.Scripts -BackupRoot $backupRoot -ContinueOnError:$ContinueOnError
+    }
+}
+
+function Set-TicketArchiveContext {
+    # Points the archive helpers in lib\Common.ps1 at this ticket's archive
+    # for the environment: {Org}\Archive\{Environment}\{N. Ticket}.
+    param([Parameter(Mandatory)]$Ticket)
+    $orgFolder = Split-Path $Ticket.Path -Parent
+    $script:ArchiveContext = @{
+        TicketPath  = $Ticket.Path
+        ArchivePath = Join-Path (Join-Path (Join-Path $orgFolder $folders.Archive) $Environment) $Ticket.Name
     }
 }
 
@@ -255,7 +322,7 @@ $releaseFolder = Join-Path (Join-Path $settings.CRMDeployments $DeploymentDate) 
 if (-not (Test-Path -LiteralPath $releaseFolder -PathType Container)) {
     throw "Release folder not found: $releaseFolder"
 }
-$tickets = @(Get-ReleaseTickets -ReleaseFolder $releaseFolder -ExcludeNames @($folders.Logs) -Ticket $ChangeControlTicket)
+$tickets = @(Get-ReleaseTickets -ReleaseFolder $releaseFolder -ExcludeNames @($folders.Logs, $folders.Archive) -Ticket $ChangeControlTicket -OrgName $TargetOrgName)
 $orgs = @($tickets | ForEach-Object { $_.Org } | Select-Object -Unique)
 
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -279,6 +346,7 @@ try {
     Write-Info "Environment: $Environment"
     Write-Info "Run by:      $([Environment]::UserDomainName)\$([Environment]::UserName) on $([Environment]::MachineName)"
     if ($WhatIfPreference) { Write-Info 'Mode:        WhatIf (nothing will be changed)' }
+    if ($IgnoreArchive) { Write-Info 'Archive:     ignored (-IgnoreArchive): everything is deployed' }
 
     # --- Check everything before changing anything ----------------------------
 
@@ -304,10 +372,13 @@ try {
 
     foreach ($ticket in $tickets) {
         try {
+            Set-TicketArchiveContext -Ticket $ticket
             $plan = Get-TicketPlan -Ticket $ticket
             $ticket | Add-Member -NotePropertyName Plan -NotePropertyValue $plan
-            Write-Info ("{0}: {1} non-isolated assembly(ies), {2} solution(s), {3} sandbox assembly(ies), {4} setup row(s), {5} PS script(s)" -f `
-                $ticket.Label, $plan.NonIsolatedAssemblies.Count, $plan.Solutions.Count, $plan.Assemblies.Count, $plan.SetupRows.Count, $plan.Scripts.Count)
+            $line = "{0}: {1} non-isolated assembly(ies), {2} solution(s), {3} sandbox assembly(ies), {4} setup row(s), {5} PS script(s)" -f `
+                $ticket.Label, $plan.NonIsolatedAssemblies.Count, $plan.Solutions.Count, $plan.Assemblies.Count, $plan.SetupRows.Count, $plan.Scripts.Count
+            if ($plan.Archived.Count -gt 0) { $line += "; $($plan.Archived.Count) already deployed (archive)" }
+            Write-Info $line
         } catch {
             $problems += "$($ticket.Label): $($_.Exception.Message)"
         }
@@ -320,7 +391,17 @@ try {
     }
 
     if (($tickets | ForEach-Object { $_.Plan.TotalCount } | Measure-Object -Sum).Sum -eq 0) {
-        Write-Warn 'Nothing to deploy.'
+        if (($tickets | ForEach-Object { $_.Plan.Archived.Count } | Measure-Object -Sum).Sum -eq 0) {
+            Write-Warn 'Nothing to deploy.'
+        } else {
+            Write-Warn "Nothing left to deploy: everything is already deployed to $Environment (archive). Use -IgnoreArchive to deploy it again."
+            foreach ($ticket in $tickets) {
+                $script:CurrentTicket = $ticket.Label
+                foreach ($archived in $ticket.Plan.Archived) {
+                    Add-DeploymentResult -Stage $archived.Stage -Item $archived.Item -Status Skipped -Detail "Already deployed to $Environment (archive)"
+                }
+            }
+        }
         return
     }
 
@@ -339,7 +420,7 @@ try {
             }
         }
         if (($orgTickets | ForEach-Object { $_.Plan.CrmItemCount } | Measure-Object -Sum).Sum -gt 0) {
-            $connections[$org] = Connect-CrmTarget -Target $orgTarget -OrgName $org -Credential $Credential
+            $connections[$org] = Connect-CrmTarget -Target $orgTarget -OrgName $org -Credential $Credential -TimeoutSeconds $settings.ConnectionTimeoutInSeconds
         }
     }
     Write-Info 'Checks passed.'
@@ -354,18 +435,16 @@ try {
 
     # --- Deploy, one ticket at a time ------------------------------------------
 
+    # A failed ticket does not stop the run: the next ticket is deployed.
     foreach ($ticket in $tickets) {
         $script:CurrentTicket = $ticket.Label
-        if ((Test-HasFailures) -and -not $ContinueOnError) {
-            Add-DeploymentResult -Stage 'Ticket' -Item $ticket.Label -Status Skipped -Detail 'Not deployed: an earlier ticket failed'
-            continue
-        }
+        Set-TicketArchiveContext -Ticket $ticket
         if ($tickets.Count -gt 1) {
             Write-Host ''
             Write-Host "##### Ticket $($ticket.Label) -> $($orgTargets[$ticket.Org].OrgUrl) #####" -ForegroundColor Magenta
         }
         if ($ticket.Plan.TotalCount -eq 0) {
-            Write-Info 'Nothing to deploy.'
+            Invoke-TicketDeployment -Ticket $ticket -Conn $null
             continue
         }
         $conn = if ($connections.ContainsKey($ticket.Org)) { $connections[$ticket.Org] } else { $null }
@@ -381,6 +460,18 @@ try {
     if ($results.Count -gt 0) {
         Write-Step 'Summary'
         $results | Format-Table $columns -AutoSize -Wrap | Out-String -Width 200 | Write-Host
+    }
+    if ($tickets.Count -gt 1 -and $results.Count -gt 0) {
+        Write-Step 'Tickets'
+        foreach ($ticket in $tickets) {
+            if (Test-HasFailures -Ticket $ticket.Label) {
+                Write-Host "  FAILED  $($ticket.Label)" -ForegroundColor Red
+            } elseif (@($results | Where-Object { $_.Ticket -eq $ticket.Label }).Count -gt 0) {
+                Write-Host "  OK      $($ticket.Label)" -ForegroundColor Green
+            } else {
+                Write-Host "  -       $($ticket.Label) (not reached)"
+            }
+        }
     }
     # In a run of several tickets, leave each ticket its own part of the summary.
     if ($tickets.Count -gt 1) {

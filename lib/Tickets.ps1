@@ -39,7 +39,8 @@ function Get-ReleaseTickets {
     .DESCRIPTION
     With -Ticket, returns the folder whose full name or ticket part matches
     it (so CC-3554 finds "Fidelis\1. CC-3554"), in every org that has one:
-    a ticket for several clients is deployed to each of them. Without
+    a ticket for several clients is deployed to each of them. -OrgName
+    limits that to one org folder (matched case-insensitively). Without
     it, returns every ticket folder of every org, and throws if any is
     unnumbered or two in the same org share a number or a ticket, so
     nothing is skipped or run out of order by accident.
@@ -47,7 +48,8 @@ function Get-ReleaseTickets {
     param(
         [Parameter(Mandatory)][string]$ReleaseFolder,
         [string[]]$ExcludeNames = @(),
-        [string]$Ticket
+        [string]$Ticket,
+        [string]$OrgName
     )
     $orgFolders = @(Get-ChildItem -LiteralPath $ReleaseFolder -Directory |
         Where-Object { $ExcludeNames -notcontains $_.Name } |
@@ -55,14 +57,21 @@ function Get-ReleaseTickets {
     if ($orgFolders.Count -eq 0) {
         throw "No org folders in $ReleaseFolder"
     }
+    if ($OrgName) {
+        $orgFolders = @($orgFolders | Where-Object { $_.Name -eq $OrgName })
+        if ($orgFolders.Count -eq 0) {
+            throw "No org folder '$OrgName' in $ReleaseFolder"
+        }
+    }
 
     if ($Ticket) {
         $found = @(foreach ($orgFolder in $orgFolders) {
             Get-TicketFolderEntries -OrgFolder $orgFolder.FullName -OrgName $orgFolder.Name |
-                Where-Object { $_.Name -eq $Ticket -or $_.Ticket -eq $Ticket }
+                Where-Object { $ExcludeNames -notcontains $_.Name -and ($_.Name -eq $Ticket -or $_.Ticket -eq $Ticket) }
         })
         if ($found.Count -eq 0) {
-            throw "No ticket folder '$Ticket' (or 'N. $Ticket') in any org folder under $ReleaseFolder"
+            $where = if ($OrgName) { "$ReleaseFolder\$($orgFolders[0].Name)" } else { "any org folder under $ReleaseFolder" }
+            throw "No ticket folder '$Ticket' (or 'N. $Ticket') in $where"
         }
         foreach ($group in @($found | Group-Object Org | Where-Object { $_.Count -gt 1 })) {
             throw "More than one folder in $($group.Name) matches ticket '$Ticket': $(($group.Group | ForEach-Object { $_.Name }) -join ', ')"

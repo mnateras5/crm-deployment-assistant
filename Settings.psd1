@@ -17,7 +17,10 @@
     CRMDeployments = '\\turningpoint-healthcare.com\it\Application Development\CRM Deployments'
 
     # Sub-folder names inside a ticket folder. Logs and Backups are created by
-    # the script, so each ticket folder keeps its own audit trail.
+    # the script, so each ticket folder keeps its own audit trail. Archive is
+    # created in each org folder: {Org}\Archive\{Env}\{N. Ticket}\... holds a
+    # copy of every item deployed to that environment, and items whose
+    # archived copy is identical are skipped on the next run.
     FolderNames = @{
         NonIsolatedAssemblies = 'CRM Non-Isolated Assemblies'
         Solutions             = 'CRM Solutions'
@@ -26,7 +29,12 @@
         PSScripts             = 'PS Scripts'
         Logs                  = 'Logs'
         Backups               = 'Backups'
+        Archive               = 'Archive'
     }
+
+    # Timeout for connecting to CRM and for each CRM request, in seconds
+    # (the SDK default is 120).
+    ConnectionTimeoutInSeconds = 180
 
     Solutions = @{
         # Optional file inside "CRM Solutions" listing the .zip files (one per
@@ -43,14 +51,15 @@
 
     # The Setup entity updated from the "Setup Data" CSV files (columns ID,
     # Name, Value). A row is matched on IdAttribute, else on NameAttribute,
-    # and only ValueAttribute is updated. Names are from the mm360_setup
-    # entity's schema.
+    # and ValueAttribute is updated; a record matching neither is created.
+    # Names are from the mm360_setup entity's schema.
     SetupData = @{
         EntityLogicalName = 'mm360_setup'
         IdAttribute       = 'mm360_setupid'
         NameAttribute     = 'mm360_name'
         ValueAttribute    = 'mm360_value'
-        # mm360_value is a single line of text, max 500 characters.
+        # mm360_name max 100 characters (required), mm360_value max 500.
+        NameMaxLength     = 100
         ValueMaxLength    = 500
     }
 

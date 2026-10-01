@@ -152,6 +152,7 @@ function Invoke-AssemblyDeployment {
                 version = $assembly.Version.ToString()
             } -ErrorAction Stop
             Add-DeploymentResult -Stage $stage -Item $item -Status Deployed -Detail "Updated $change"
+            Add-ToArchive -Path $assembly.File.FullName
         } catch {
             Add-DeploymentResult -Stage $stage -Item $item -Status Failed -Detail $_.Exception.Message
             if (-not $ContinueOnError) { break }
