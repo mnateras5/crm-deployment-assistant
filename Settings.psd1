@@ -32,8 +32,10 @@
         Archive               = 'Archive'
     }
 
-    # Timeout for connecting to CRM and for each CRM request, in seconds
-    # (the SDK default is 120).
+    # Timeout for each CRM request (e.g. a solution import), in seconds; the
+    # SDK default is 120. With newer CRM connector versions it also covers
+    # connecting. If the installed version can't take it, the run warns and
+    # the default applies.
     ConnectionTimeoutInSeconds = 180
 
     Solutions = @{

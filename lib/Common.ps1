@@ -139,6 +139,43 @@ function Get-TurningPointCrmCredentials(){
 	New-Object System.Management.Automation.PSCredential ($UserName, $Password)
 }
 
+function Set-CrmRequestTimeout {
+    <#
+    .SYNOPSIS
+    Sets how long each CRM request on this connection may take (the SDK
+    default is 2 minutes), using whatever the installed module and CRM
+    connector versions support. Never fails the run: warns instead.
+    #>
+    param(
+        [Parameter(Mandatory)]$Conn,
+        [Parameter(Mandatory)][TimeSpan]$Timeout
+    )
+    try {
+        if (Get-Command Set-CrmConnectionTimeout -ErrorAction SilentlyContinue) {
+            Set-CrmConnectionTimeout -conn $Conn -TimeoutInSeconds ([int]$Timeout.TotalSeconds) -ErrorAction Stop | Out-Null
+            Write-Info "Request timeout: $([int]$Timeout.TotalSeconds)s."
+            return
+        }
+        # On-premises (AD) connections go through an OrganizationServiceProxy;
+        # newer connectors use an OrganizationWebProxyClient.
+        $proxyProperty = $Conn.PSObject.Properties['OrganizationServiceProxy']
+        if ($proxyProperty -and $proxyProperty.Value) {
+            $proxyProperty.Value.Timeout = $Timeout
+            Write-Info "Request timeout: $([int]$Timeout.TotalSeconds)s."
+            return
+        }
+        $webProperty = $Conn.PSObject.Properties['OrganizationWebProxyClient']
+        if ($webProperty -and $webProperty.Value) {
+            $webProperty.Value.InnerChannel.OperationTimeout = $Timeout
+            Write-Info "Request timeout: $([int]$Timeout.TotalSeconds)s."
+            return
+        }
+        Write-Warn 'Could not set the CRM request timeout on this connection; the default (2 minutes) applies.'
+    } catch {
+        Write-Warn "Could not set the CRM request timeout: $($_.Exception.Message). The default (2 minutes) applies."
+    }
+}
+
 function Connect-CrmTarget {
     param(
         [Parameter(Mandatory)]$Target,
@@ -155,30 +192,38 @@ function Connect-CrmTarget {
     }
     Import-Module Microsoft.Xrm.Data.PowerShell -ErrorAction Stop
 
-    # Applies to every CrmServiceClient created from here on, including the
-    # connection below.
-    [Microsoft.Xrm.Tooling.Connector.CrmServiceClient]::MaxConnectionTimeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
+    $timeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
 
-    Write-Info "Connecting to $($Target.OrgUrl) (timeout ${TimeoutSeconds}s) ..."
-    if ($Credential) {
-        $conn = Connect-CrmOnPremDiscovery -ServerUrl $Target.ServerUrl -OrganizationName $OrgName -Credential $Credential -ErrorAction Stop
-    } else {
+    # Newer versions of the CRM connector have a global timeout that also
+    # covers connecting; older ones don't, so only set it when it exists.
+    $clientType = 'Microsoft.Xrm.Tooling.Connector.CrmServiceClient' -as [type]
+    $globalTimeout = if ($clientType) { $clientType.GetProperty('MaxConnectionTimeout', [Reflection.BindingFlags]'Public, Static') } else { $null }
+    if ($globalTimeout -and $globalTimeout.CanWrite) {
+        $globalTimeout.SetValue($null, $timeout)
+    }
+
+    if (-not $Credential) {
         #$conn = Get-CrmConnection -ConnectionString "AuthType=AD;Url=$($Target.OrgUrl)" -ErrorAction Stop
         $Credential = Get-TurningPointCrmCredentials
-        $conn = Connect-CrmOnPremDiscovery -ServerUrl $Target.ServerUrl -OrganizationName $OrgName -Credential $Credential -ErrorAction Stop
     }
+    $connectArgs = @{
+        ServerUrl        = $Target.ServerUrl
+        OrganizationName = $OrgName
+        Credential       = $Credential
+        ErrorAction      = 'Stop'
+    }
+    # Module versions that take the timeout as a parameter.
+    if ((Get-Command Connect-CrmOnPremDiscovery).Parameters.ContainsKey('ConnectionTimeoutInSeconds')) {
+        $connectArgs.ConnectionTimeoutInSeconds = $TimeoutSeconds
+    }
+
+    Write-Info "Connecting to $($Target.OrgUrl) ..."
+    $conn = Connect-CrmOnPremDiscovery @connectArgs
     if (-not $conn -or -not $conn.IsReady) {
         $reason = if ($conn) { $conn.LastCrmError } else { 'no connection returned' }
         throw "Could not connect to $($Target.OrgUrl): $reason"
     }
-    # Also set it on this connection, for module versions that read it there.
-    if (Get-Command Set-CrmConnectionTimeout -ErrorAction SilentlyContinue) {
-        try {
-            Set-CrmConnectionTimeout -conn $conn -TimeoutInSeconds $TimeoutSeconds | Out-Null
-        } catch {
-            Write-Warn "Could not set the connection timeout: $($_.Exception.Message)"
-        }
-    }
+    Set-CrmRequestTimeout -Conn $conn -Timeout $timeout
     Write-Info "Connected to $($conn.ConnectedOrgFriendlyName) ($($conn.ConnectedOrgVersion))."
     return $conn
 }
