@@ -79,9 +79,15 @@ OrgClusters mapping in Settings.psd1. Only allowed when the run deploys to
 a single org.
 
 .PARAMETER Credential
-Credential for the CRM connection. Without it, the PSServiceAccount
-credentials from $SecuritySettings are used (see Connect-CrmTarget in
-lib\Common.ps1).
+Credential for the CRM connection. Without it (and without
+-PromptCredentials), the PSServiceAccount credentials from
+$SecuritySettings are used (see Connect-CrmTarget in lib\Common.ps1).
+
+.PARAMETER PromptCredentials
+Ask the person running the script for the CRM credentials (the standard
+Windows credential prompt), instead of using the predefined service
+account. Asked once, just before connecting, and used for every org in the
+run. Can't be combined with -Credential.
 
 .PARAMETER SettingsPath
 Path to the settings file. Defaults to Settings.psd1 next to this script.
@@ -163,6 +169,8 @@ param(
 
     [System.Management.Automation.PSCredential]$Credential,
 
+    [switch]$PromptCredentials,
+
     [string]$SettingsPath = (Join-Path $PSScriptRoot 'Settings.psd1'),
 
     [switch]$SkipNonIsolatedAssemblies,
@@ -180,6 +188,10 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+if ($Credential -and $PromptCredentials) {
+    throw '-Credential and -PromptCredentials can''t be used together: pass a credential, or be asked for one.'
+}
 
 if ($PSBoundParameters.ContainsKey('SourceOrgName')) {
     throw ("-SourceOrgName is no longer supported. The org now comes from the org folder: " +
@@ -347,6 +359,8 @@ try {
     Write-Info "Run by:      $([Environment]::UserDomainName)\$([Environment]::UserName) on $([Environment]::MachineName)"
     if ($WhatIfPreference) { Write-Info 'Mode:        WhatIf (nothing will be changed)' }
     if ($IgnoreArchive) { Write-Info 'Archive:     ignored (-IgnoreArchive): everything is deployed' }
+    if ($PromptCredentials) { Write-Info 'Credentials: entered by the person running the script' }
+    elseif ($Credential) { Write-Info "Credentials: $($Credential.UserName) (-Credential)" }
 
     # --- Check everything before changing anything ----------------------------
 
@@ -408,6 +422,17 @@ try {
     # Check each org's PS scripts target, and connect to each org that has
     # CRM components, before deploying anything.
     $connections = @{}
+    $crmOrgs = @($orgs | Where-Object {
+        $org = $_
+        (@($tickets | Where-Object { $_.Org -eq $org }) | ForEach-Object { $_.Plan.CrmItemCount } | Measure-Object -Sum).Sum -gt 0
+    })
+    if ($PromptCredentials -and $crmOrgs.Count -gt 0) {
+        $Credential = Get-Credential -Message "CRM credentials for $Environment ($($crmOrgs -join ', '))"
+        if (-not $Credential) {
+            throw 'No credentials were entered; nothing was deployed.'
+        }
+        Write-Info "Connecting as $($Credential.UserName)."
+    }
     foreach ($org in $orgs) {
         $orgTickets = @($tickets | Where-Object { $_.Org -eq $org })
         $orgTarget = $orgTargets[$org]

@@ -152,6 +152,7 @@ to that ticket's `Logs` folder.
 | `-DeployAll` | Every ticket of every org in the release. Use instead of `-ChangeControlTicket` |
 | `-Cluster` | PROD only: `um1`, `um2` or `um3`; overrides `OrgClusters` in settings. Only when the run covers one org |
 | `-Credential` | CRM credential; default is the `PSServiceAccount` from `$SecuritySettings` |
+| `-PromptCredentials` | Ask for the CRM credentials (Windows credential prompt) instead of using the service account; asked once per run |
 | `-WhatIf` | Dry run |
 | `-SkipNonIsolatedAssemblies`, `-SkipSolutions`, `-SkipAssemblies`, `-SkipSetupData`, `-SkipPSScripts` | Skip a stage (`-SkipAssemblies` is the Sandbox one) |
 | `-ContinueOnError` | Keep going within a ticket after a failed item |
